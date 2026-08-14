@@ -193,7 +193,7 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
   const newTodos = todos.filter((t: Todo) => t.is_new)
 
   // assemble participants (manager, report, extras) for multi-person sections
-  const participants = [
+  const participants: { id: string; full_name: string; role: string; email?: string }[] = [
     ...(meeting.manager ? [{ id: meeting.manager.id, full_name: meeting.manager.full_name, role: 'Manager' }] : []),
     ...(meeting.report ? [{ id: meeting.report.id, full_name: meeting.report.full_name, role: 'Report' }] : []),
     ...extraProfiles.map(p => ({ id: p.id, full_name: p.full_name, email: p.email, role: 'Participant' }))
