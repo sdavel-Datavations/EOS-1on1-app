@@ -40,7 +40,8 @@ export function useAuth() {
   }
 
   const signUp = async (email: string, password: string, fullName: string) => {
-    if (process.env.NODE_ENV !== 'production') {
+    const hasServiceRole = !!(process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE)
+    if (process.env.NODE_ENV !== 'production' || hasServiceRole) {
       // Create user via dev admin endpoint to avoid sending confirmation emails
       try {
         await fetch('/api/dev/create-user', { method: 'POST', body: JSON.stringify({ email, password, fullName }), headers: { 'Content-Type': 'application/json' } })
