@@ -15,12 +15,34 @@ export async function POST(req: Request) {
     const sb = createClient(SUPABASE_URL, SERVICE)
 
     // find profile id by email
-    const { data: profile } = await sb.from('profiles').select('id').eq('email', email).maybeSingle()
-    if (!profile?.id) return NextResponse.json({ error: 'user not found' }, { status: 404 })
+    // Try to find the auth user by email via the admin API, with a short retry loop
+    let userId: string | null = null
+    for (let attempt = 0; attempt < 8; attempt++) {
+      try {
+        // use admin listUsers (may be paginated) and search for email
+        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+        // @ts-ignore
+        const listRes = await sb.auth.admin.listUsers()
+        const users = listRes?.data || []
+        const found = users.find((u: any) => u.email === email)
+        if (found?.id) {
+          userId = found.id
+          break
+        }
+      } catch (e) {
+        // ignore and retry
+      }
+      // wait 300ms before retrying
+      await new Promise(r => setTimeout(r, 300))
+    }
+
+    if (!userId) return NextResponse.json({ error: 'user not found' }, { status: 404 })
 
     // attempt to mark user as confirmed via admin API
     try {
-      const { data, error } = await sb.auth.admin.updateUserById(profile.id, { email_confirm: true })
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-ignore
+      const { data, error } = await sb.auth.admin.updateUserById(userId, { email_confirm: true })
       if (error) return NextResponse.json({ error }, { status: 500 })
       return NextResponse.json({ data })
     } catch (err) {
