@@ -22,6 +22,21 @@ export async function POST(req: Request) {
       email_confirm: true,
     })
     if (error) return NextResponse.json({ error }, { status: 500 })
+
+    // ensure a profiles row exists for the new user (admin createUser may bypass auth triggers)
+    try {
+      // data may be { user } or data.user depending on SDK shape
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-ignore
+      const createdUser = data?.user || data
+      const userId = createdUser?.id
+      if (userId) {
+        await sb.from('profiles').upsert({ id: userId, full_name: fullName || '', email }, { onConflict: 'id' })
+      }
+    } catch (e) {
+      // ignore profile insert errors
+    }
+
     return NextResponse.json({ data })
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 })
