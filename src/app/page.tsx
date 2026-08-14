@@ -1,6 +1,7 @@
 'use client'
 
 import { useAuth, useMeetings, createMeeting } from '@/lib/hooks'
+import { getResolvedSupabaseUrl } from '@/lib/supabase'
 import { useState } from 'react'
 import Link from 'next/link'
 import type { Meeting } from '@/lib/types'
@@ -26,9 +27,16 @@ export default function Home() {
 
   // ── Auth Screen ──
   if (!user) {
+    const supabaseInfo = getResolvedSupabaseUrl()
     return (
       <div className="flex items-center justify-center min-h-screen bg-bg">
         <div className="bg-white rounded-xl shadow-lg p-8 w-full max-w-md">
+          {supabaseInfo.original && (
+            <div className={`text-xs p-2 mb-4 rounded ${supabaseInfo.autoCorrected ? 'bg-amber-50 text-amber-800' : 'bg-yellow-50 text-yellow-800'}`}>
+              Supabase URL (runtime): {supabaseInfo.original}
+              {supabaseInfo.autoCorrected && <span> — auto-resolved to {supabaseInfo.resolved}</span>}
+            </div>
+          )}
           <div className="text-center mb-6">
             <h1 className="text-2xl font-bold text-deep-purple tracking-wide">DATAVATIONS</h1>
             <p className="text-gray text-sm mt-1">Weekly 1-on-1 Agenda</p>
