@@ -27,6 +27,7 @@ function loadDotenvIfNeeded() {
 }
 
 export async function seedAndLogin(page: Page, email: string, password: string, fullName = '') {
+  loadDotenvIfNeeded()
   const baseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
   const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 
