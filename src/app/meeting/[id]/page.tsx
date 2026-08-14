@@ -192,6 +192,13 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
   const carriedTodos = todos.filter((t: Todo) => !t.is_new)
   const newTodos = todos.filter((t: Todo) => t.is_new)
 
+  // assemble participants (manager, report, extras) for multi-person sections
+  const participants = [
+    ...(meeting.manager ? [{ id: meeting.manager.id, full_name: meeting.manager.full_name, role: 'Manager' }] : []),
+    ...(meeting.report ? [{ id: meeting.report.id, full_name: meeting.report.full_name, role: 'Report' }] : []),
+    ...extraProfiles.map(p => ({ id: p.id, full_name: p.full_name, email: p.email, role: 'Participant' }))
+  ]
+
   return (
     <div className="min-h-screen">
       {/* Header */}
@@ -367,100 +374,58 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
                     <p className="text-sm text-gray font-condensed leading-relaxed">
                       Each person shares one personal and one professional win from the past week.
                     </p>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {/* Manager column */}
-                      <div>
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="flex items-center gap-2">
-                            <div className="w-7 h-7 rounded-full flex items-center justify-center text-white font-semibold text-xs" style={{ backgroundColor: colorFor(meeting.manager?.id || meeting.manager?.full_name) }}>{initials(meeting.manager?.full_name)}</div>
-                            <label className="text-[11px] font-bold uppercase tracking-wide text-medium-purple">{meeting.manager?.full_name || 'Manager'}</label>
-                          </div>
-                          <span className="text-xs text-gray">Manager</span>
-                        </div>
-                        {managerSegue ? (
-                          <>
-                            {amManager ? (
-                              <>
-                                <textarea
-                                  defaultValue={managerSegue.personal_win || ''}
-                                  placeholder="Personal win..."
-                                  onBlur={e => updateSegueNote(managerSegue.id, { personal_win: e.target.value })}
-                                  className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none mb-2"
-                                  rows={2}
-                                />
-                                <textarea
-                                  defaultValue={managerSegue.professional_win || ''}
-                                  placeholder="Professional win..."
-                                  onBlur={e => updateSegueNote(managerSegue.id, { professional_win: e.target.value })}
-                                  className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none"
-                                  rows={2}
-                                />
-                              </>
-                            ) : (
-                              <>
-                                <p className="text-sm">{managerSegue.personal_win || <span className="text-light-gray italic">Not yet filled in</span>}</p>
-                                <p className="text-sm mt-1">{managerSegue.professional_win || <span className="text-light-gray italic">Not yet filled in</span>}</p>
-                              </>
-                            )}
-                          </>
-                        ) : (
-                          amManager ? (
-                            <>
-                              <textarea placeholder="Personal win..." className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none mb-2" rows={2} />
-                              <textarea placeholder="Professional win..." className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none" rows={2} />
-                            </>
-                          ) : (
-                            <p className="text-sm text-light-gray italic">Not yet filled in</p>
-                          )
-                        )}
-                      </div>
 
-                      {/* Report column */}
-                      <div>
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="flex items-center gap-2">
-                            <div className="w-7 h-7 rounded-full flex items-center justify-center text-white font-semibold text-xs" style={{ backgroundColor: colorFor(meeting.report?.id || meeting.report?.full_name) }}>{initials(meeting.report?.full_name)}</div>
-                            <label className="text-[11px] font-bold uppercase tracking-wide text-medium-purple">{meeting.report?.full_name || 'Report'}</label>
-                          </div>
-                          <span className="text-xs text-gray">Report</span>
-                        </div>
-                        {reportSegue ? (
-                          <>
-                            {amReport ? (
-                              <>
-                                <textarea
-                                  defaultValue={reportSegue.personal_win || ''}
-                                  placeholder="Personal win..."
-                                  onBlur={e => updateSegueNote(reportSegue.id, { personal_win: e.target.value })}
-                                  className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none mb-2"
-                                  rows={2}
-                                />
-                                <textarea
-                                  defaultValue={reportSegue.professional_win || ''}
-                                  placeholder="Professional win..."
-                                  onBlur={e => updateSegueNote(reportSegue.id, { professional_win: e.target.value })}
-                                  className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none"
-                                  rows={2}
-                                />
-                              </>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {participants.map(p => {
+                        const note = segueNotes.find((n: SegueNote) => n.user_id === p.id)
+                        const am = user.id === p.id
+                        return (
+                          <div key={p.id}>
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="flex items-center gap-2">
+                                <div className="w-7 h-7 rounded-full flex items-center justify-center text-white font-semibold text-xs" style={{ backgroundColor: colorFor(p.id || p.full_name) }}>{initials(p.full_name)}</div>
+                                <label className="text-[11px] font-bold uppercase tracking-wide text-medium-purple">{p.full_name || p.email}</label>
+                              </div>
+                              <span className="text-xs text-gray">{p.role}</span>
+                            </div>
+
+                            {note ? (
+                              am ? (
+                                <>
+                                  <textarea
+                                    defaultValue={note.personal_win || ''}
+                                    placeholder="Personal win..."
+                                    onBlur={e => updateSegueNote(note.id, { personal_win: e.target.value })}
+                                    className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none mb-2"
+                                    rows={2}
+                                  />
+                                  <textarea
+                                    defaultValue={note.professional_win || ''}
+                                    placeholder="Professional win..."
+                                    onBlur={e => updateSegueNote(note.id, { professional_win: e.target.value })}
+                                    className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none"
+                                    rows={2}
+                                  />
+                                </>
+                              ) : (
+                                <>
+                                  <p className="text-sm">{note.personal_win || <span className="text-light-gray italic">Not yet filled in</span>}</p>
+                                  <p className="text-sm mt-1">{note.professional_win || <span className="text-light-gray italic">Not yet filled in</span>}</p>
+                                </>
+                              )
                             ) : (
-                              <>
-                                <p className="text-sm">{reportSegue.personal_win || <span className="text-light-gray italic">Not yet filled in</span>}</p>
-                                <p className="text-sm mt-1">{reportSegue.professional_win || <span className="text-light-gray italic">Not yet filled in</span>}</p>
-                              </>
+                              am ? (
+                                <>
+                                  <textarea placeholder="Personal win..." className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none mb-2" rows={2} />
+                                  <textarea placeholder="Professional win..." className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none" rows={2} />
+                                </>
+                              ) : (
+                                <p className="text-sm text-light-gray italic">Not yet filled in</p>
+                              )
                             )}
-                          </>
-                        ) : (
-                          amReport ? (
-                            <>
-                              <textarea placeholder="Personal win..." className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none mb-2" rows={2} />
-                              <textarea placeholder="Professional win..." className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none" rows={2} />
-                            </>
-                          ) : (
-                            <p className="text-sm text-light-gray italic">Not yet filled in</p>
-                          )
-                        )}
-                      </div>
+                          </div>
+                        )
+                      })}
                     </div>
                   </div>
                 )}
