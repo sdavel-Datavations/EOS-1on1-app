@@ -40,21 +40,27 @@ export function useAuth() {
   }
 
   const signUp = async (email: string, password: string, fullName: string) => {
-    const res = await getSupabase().auth.signUp({
-      email,
-      password,
-      options: { data: { full_name: fullName } }
-    })
-    // attempt dev auto-confirm for faster local E2E
-    await devAutoConfirm(email)
-    // In dev, attempt to sign the user in after confirmation so UI updates immediately
     if (process.env.NODE_ENV !== 'production') {
+      // Create user via dev admin endpoint to avoid sending confirmation emails
+      try {
+        await fetch('/api/dev/create-user', { method: 'POST', body: JSON.stringify({ email, password, fullName }), headers: { 'Content-Type': 'application/json' } })
+      } catch (err) {
+        // ignore
+      }
+      // Attempt to sign in directly
       for (let attempt = 0; attempt < 5; attempt++) {
         const signInRes = await getSupabase().auth.signInWithPassword({ email, password })
         if (!signInRes.error) return signInRes
         await new Promise(r => setTimeout(r, 300))
       }
+      // fallback to client signUp
     }
+
+    const res = await getSupabase().auth.signUp({
+      email,
+      password,
+      options: { data: { full_name: fullName } }
+    })
     return res
   }
 
