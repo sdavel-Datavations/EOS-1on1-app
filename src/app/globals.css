@@ -1,6 +1,4 @@
 @import "tailwindcss";
-@import url('https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,300;0,400;0,600;0,700;1,400&family=Roboto+Condensed:wght@400;700&display=swap');
-
 @theme inline {
   --color-deep-purple: #3e1241;
   --color-steel-blue: #2e7eb2;
