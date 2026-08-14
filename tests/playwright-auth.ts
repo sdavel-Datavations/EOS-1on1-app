@@ -1,6 +1,30 @@
-import 'dotenv/config'
 import { Page } from '@playwright/test'
 import { createClient } from '@supabase/supabase-js'
+import fs from 'fs'
+import path from 'path'
+
+function loadDotenvIfNeeded() {
+  if (process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) return
+  try {
+    const p = path.resolve(process.cwd(), '.env.local')
+    if (!fs.existsSync(p)) return
+    const contents = fs.readFileSync(p, 'utf8')
+    contents.split(/\n/).forEach(line => {
+      const m = line.match(/^\s*([^=#]+)=(.*)$/)
+      if (m) {
+        const key = m[1].trim()
+        let val = m[2].trim()
+        // strip surrounding quotes
+        if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+          val = val.slice(1, -1)
+        }
+        if (!process.env[key]) process.env[key] = val
+      }
+    })
+  } catch (e) {
+    // ignore
+  }
+}
 
 export async function seedAndLogin(page: Page, email: string, password: string, fullName = '') {
   const baseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
