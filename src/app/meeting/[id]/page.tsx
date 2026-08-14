@@ -445,24 +445,24 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
                           </div>
                           <span className="text-xs text-gray">Manager</span>
                         </div>
-                        {managerHeadline ? (
-                          amManager ? (
-                            <textarea
-                              defaultValue={managerHeadline.content || ''}
-                              placeholder="News and updates..."
-                              onBlur={e => updateHeadline(managerHeadline.id, e.target.value)}
-                              className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none"
-                              rows={3}
-                            />
-                          ) : (
-                            <div className="bg-bg rounded-lg p-3"><p className="text-sm whitespace-pre-wrap">{managerHeadline.content || <span className="text-light-gray italic">Not yet filled in</span>}</p></div>
-                          )
-                        ) : (
-                          amManager ? (
-                            <textarea placeholder="News and updates..." className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none" rows={3} />
-                          ) : (
-                            <p className="text-sm text-light-gray italic">Not yet filled in</p>
-                          )}
+                        {managerHeadline && amManager && (
+                          <textarea
+                            defaultValue={managerHeadline.content || ''}
+                            placeholder="News and updates..."
+                            onBlur={e => updateHeadline(managerHeadline.id, e.target.value)}
+                            className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none"
+                            rows={3}
+                          />
+                        )}
+                        {managerHeadline && !amManager && (
+                          <div className="bg-bg rounded-lg p-3"><p className="text-sm whitespace-pre-wrap">{managerHeadline.content || <span className="text-light-gray italic">Not yet filled in</span>}</p></div>
+                        )}
+                        {!managerHeadline && amManager && (
+                          <textarea placeholder="News and updates..." className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none" rows={3} />
+                        )}
+                        {!managerHeadline && !amManager && (
+                          <p className="text-sm text-light-gray italic">Not yet filled in</p>
+                        )}
                       </div>
 
                       {/* Report headlines */}
@@ -474,24 +474,24 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
                           </div>
                           <span className="text-xs text-gray">Report</span>
                         </div>
-                        {reportHeadline ? (
-                          amReport ? (
-                            <textarea
-                              defaultValue={reportHeadline.content || ''}
-                              placeholder="News and updates..."
-                              onBlur={e => updateHeadline(reportHeadline.id, e.target.value)}
-                              className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none"
-                              rows={3}
-                            />
-                          ) : (
-                            <div className="bg-bg rounded-lg p-3"><p className="text-sm whitespace-pre-wrap">{reportHeadline.content || <span className="text-light-gray italic">Not yet filled in</span>}</p></div>
-                          )
-                        ) : (
-                          amReport ? (
-                            <textarea placeholder="News and updates..." className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none" rows={3} />
-                          ) : (
-                            <p className="text-sm text-light-gray italic">Not yet filled in</p>
-                          )}
+                        {reportHeadline && amReport && (
+                          <textarea
+                            defaultValue={reportHeadline.content || ''}
+                            placeholder="News and updates..."
+                            onBlur={e => updateHeadline(reportHeadline.id, e.target.value)}
+                            className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none"
+                            rows={3}
+                          />
+                        )}
+                        {reportHeadline && !amReport && (
+                          <div className="bg-bg rounded-lg p-3"><p className="text-sm whitespace-pre-wrap">{reportHeadline.content || <span className="text-light-gray italic">Not yet filled in</span>}</p></div>
+                        )}
+                        {!reportHeadline && amReport && (
+                          <textarea placeholder="News and updates..." className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none" rows={3} />
+                        )}
+                        {!reportHeadline && !amReport && (
+                          <p className="text-sm text-light-gray italic">Not yet filled in</p>
+                        )}
                       </div>
                     </div>
                   </div>
