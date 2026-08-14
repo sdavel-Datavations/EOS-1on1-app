@@ -2,19 +2,37 @@ Local development helpers
 
 Start dev server (polling enabled):
 
-    npm run dev
+        npm run dev
 
 Stop any running dev server on port 3000:
 
-    npm run stop
+        npm run stop
 
 If you get Watchpack EMFILE errors despite polling, either:
-- increase macOS file limits (requires reboot and admin steps), or
-- keep using polling (less efficient but stable).
+
+- Quick mitigation (already set in `package.json`): start dev with polling:
+    - `npm run dev` (uses `CHOKIDAR_USEPOLLING=true`)
+
+- Increase OS limits (recommended for large projects):
+    - Check current limits:
+        - `launchctl limit maxfiles`
+        - `sysctl kern.maxfiles kern.maxfilesperproc`
+    - Temporarily increase (until reboot):
+        - `sudo sysctl -w kern.maxfiles=524288`
+        - `sudo sysctl -w kern.maxfilesperproc=524288`
+    - Make persistent (requires sudo): create `/Library/LaunchDaemons/limit.maxfiles.plist` and load it with `launchctl`.
+        - A helper and plist template is available at `scripts/increase_watch_limit.sh`.
+
+### Kill stray Next processes
+
+- Stop the server listening on port 3000:
+    - `npm run stop`
+- More aggressive (kills `next dev`):
+    - `npm run stop-all`
 
 Smoke test locally (hits deployed URL by default):
 
-    npm run smoke
+        npm run smoke
 
 To seed example data in Supabase (manual steps):
 1. Create a test user via Supabase Auth (sign up or invite).
