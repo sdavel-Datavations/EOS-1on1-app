@@ -1,23 +1,18 @@
 import { test, expect } from '@playwright/test'
+import { seedAndLogin } from './playwright-auth'
 
 test('signup -> create meeting', async ({ page, baseURL }) => {
-  // Use baseURL from config (DEPLOY_URL or localhost)
-  await page.goto('/');
-
-  // Switch to sign up flow
-  await page.getByText('Sign up').click();
-
   const name = 'E2E User'
   const email = `e2e+${Date.now()}@example.com`
   const password = 'Password123!'
 
-  await page.getByPlaceholder('Full name').fill(name)
-  await page.getByPlaceholder('Email').fill(email)
-  await page.getByPlaceholder('Password').fill(password)
+  // create user and set session directly to avoid email flows
+  await seedAndLogin(page, email, password, name)
 
-  await page.getByRole('button', { name: 'Create Account' }).click()
+  // Now visit the app (session is preloaded)
+  await page.goto('/')
 
-  // After signup, dashboard should show
+  // Dashboard should show
   await page.getByText('New Meeting').waitFor({ timeout: 10000 })
 
   // Start a meeting; leave report email blank
