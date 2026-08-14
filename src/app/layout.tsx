@@ -11,7 +11,7 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const commit = process.env.NEXT_PUBLIC_COMMIT_SHA || ''
+  const commit = process.env.NEXT_PUBLIC_COMMIT_SHA || process.env.VERCEL_GIT_COMMIT_SHA || process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA || ''
   return (
     <html lang="en" className="h-full antialiased">
       <body className="min-h-full flex flex-col bg-bg font-sans">
