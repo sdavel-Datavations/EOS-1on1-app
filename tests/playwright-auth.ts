@@ -55,6 +55,8 @@ export async function seedAndLogin(page: Page, email: string, password: string, 
   // eslint-disable-next-line no-console
   console.log('signInRes', JSON.stringify(signInRes?.error ? { error: signInRes.error } : { ok: !!signInRes.data }))
   const session = signInRes?.data?.session || null
+  // eslint-disable-next-line no-console
+  console.log('session', JSON.stringify(session))
 
   // compute storage key used by supabase-js
   const projRef = new URL(baseUrl).hostname.split('.')[0]
