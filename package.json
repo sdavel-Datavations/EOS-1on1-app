@@ -4,6 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "CHOKIDAR_USEPOLLING=true next dev",
+    "stop": "lsof -i :3000 -t | xargs -r kill || true",
+    "smoke": "node ./scripts/smoke.js",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"

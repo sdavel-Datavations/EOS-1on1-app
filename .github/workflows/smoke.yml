@@ -1,0 +1,22 @@
+name: Smoke check
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Curl homepage
+        run: |
+          set -e
+          URL=https://eos-1on1-app.vercel.app/
+          echo "Checking $URL"
+          HTTP=$(curl -s -o /dev/null -w "%{http_code}" "$URL")
+          echo "Status: $HTTP"
+          if [ "$HTTP" != "200" ]; then
+            echo "Smoke check failed: $HTTP"
+            exit 1
+          fi
+          echo "Smoke check OK"
