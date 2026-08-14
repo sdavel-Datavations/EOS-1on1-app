@@ -307,6 +307,12 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
 
       {/* Sections */}
       <main className="max-w-3xl mx-auto px-4 py-6 space-y-4">
+        {/* Weekly Commitments */}
+        <div className="bg-white rounded-xl border border-light-gray p-6">
+          <h2 className="text-lg font-bold text-deep-purple mb-2">Weekly Commitments</h2>
+          <p className="text-sm text-gray mb-4">Float tasks during the week and notify assignees via email or Slack.</p>
+          <WeeklyCommitments meetingId={id} participants={[meeting.manager, meeting.report, ...extraProfiles]} />
+        </div>
         {SECTIONS.map((section, i) => (
           <div key={section.key} className={`bg-white rounded-xl border transition overflow-hidden ${
             completedSections[i] ? 'border-light-gray opacity-70' :
@@ -733,6 +739,63 @@ function TodoList({ todos, meetingId, isNew, onUpdate }: {
       <button onClick={addTodo} className="w-full border border-dashed border-light-gray rounded-lg py-2 text-xs text-gray hover:border-steel-blue hover:text-steel-blue transition">
         + Add to-do
       </button>
+    </div>
+  )
+}
+
+function WeeklyCommitments({ meetingId, participants }: { meetingId: string, participants: any[] }) {
+  const [items, setItems] = useState<any[]>([])
+  const [title, setTitle] = useState('')
+  const [assignee, setAssignee] = useState(participants[0]?.id || '')
+  const [due, setDue] = useState('')
+  const [notifyEmail, setNotifyEmail] = useState(true)
+  const [notifySlack, setNotifySlack] = useState(false)
+
+  const fetchItems = async () => {
+    const res = await fetch(`/api/commitments?meeting_id=${meetingId}`)
+    const j = await res.json()
+    setItems(j.data || [])
+  }
+
+  useEffect(() => { fetchItems() }, [])
+
+  const create = async () => {
+    if (!title || !assignee) return
+    const body = { meeting_id: meetingId, creator_id: participants[0]?.id || '', assignee_id: assignee, title, description: '', due_date: due || null, notify_email: notifyEmail, notify_slack: notifySlack }
+    await fetch('/api/commitments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    setTitle('')
+    setDue('')
+    fetchItems()
+  }
+
+  return (
+    <div>
+      <div className="space-y-3 mb-4">
+        {items.map(it => (
+          <div key={it.id} className="flex items-center justify-between p-3 border rounded">
+            <div>
+              <div className="font-semibold">{it.title}</div>
+              <div className="text-xs text-gray">Due: {it.due_date || '—'}</div>
+            </div>
+            <div className="text-sm text-gray">{it.assignee_id}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+        <input className="col-span-2 border px-3 py-2 rounded" placeholder="Commitment title" value={title} onChange={e => setTitle(e.target.value)} />
+        <input type="date" className="border px-3 py-2 rounded" value={due} onChange={e => setDue(e.target.value)} />
+        <select className="col-span-2 border px-3 py-2 rounded" value={assignee} onChange={e => setAssignee(e.target.value)}>
+          {participants.map(p => <option key={p.id} value={p.id}>{p.full_name || p.email}</option>)}
+        </select>
+        <div className="flex items-center gap-2">
+          <label className="text-sm"><input type="checkbox" checked={notifyEmail} onChange={e => setNotifyEmail(e.target.checked)} /> Email</label>
+          <label className="text-sm"><input type="checkbox" checked={notifySlack} onChange={e => setNotifySlack(e.target.checked)} /> Slack</label>
+        </div>
+        <div className="col-span-3 flex justify-end">
+          <button onClick={create} className="bg-steel-blue text-white px-4 py-2 rounded">Add Commitment</button>
+        </div>
+      </div>
     </div>
   )
 }
