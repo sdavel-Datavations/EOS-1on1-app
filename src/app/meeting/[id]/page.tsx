@@ -158,6 +158,35 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
   const reportHeadline = headlines.find((h: Headline) => h.user_id === meeting.report_id)
   const amManager = user.id === meeting.manager_id
   const amReport = user.id === meeting.report_id
+  const [extraProfiles, setExtraProfiles] = useState<{ id: string; full_name: string; email: string }[]>([])
+  
+  // derive participants from meeting + any segue/headline user_ids
+  useEffect(() => {
+    const ids = new Set<string>()
+    if (meeting.manager_id) ids.add(meeting.manager_id)
+    if (meeting.report_id) ids.add(meeting.report_id)
+    segueNotes.forEach(n => ids.add(n.user_id))
+    headlines.forEach(h => ids.add(h.user_id))
+    // remove manager/report which are already present in meeting
+    const extra = Array.from(ids).filter(id => id !== meeting.manager_id && id !== meeting.report_id)
+    if (extra.length === 0) {
+      setExtraProfiles([])
+      return
+    }
+    ;(async () => {
+      try {
+        const { createClient } = await import('@/lib/supabase')
+        const supabase = createClient()
+        const { data } = await supabase.from('profiles').select('id, full_name, email').in('id', extra)
+        setExtraProfiles(data || [])
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('Failed to load extra profiles', err)
+      }
+    })()
+  }, [meeting, segueNotes, headlines])
+  const [addingEmail, setAddingEmail] = useState('')
+  const [addingState, setAddingState] = useState<'idle' | 'loading' | 'error' | 'done'>('idle')
   const measurables = scorecardItems.filter((s: ScorecardItem) => s.item_type === 'measurable')
   const rocks = scorecardItems.filter((s: ScorecardItem) => s.item_type === 'rock')
   const carriedTodos = todos.filter((t: Todo) => !t.is_new)
@@ -185,6 +214,7 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
       {/* Participants */}
       <div className="px-6 py-3 bg-white border-b border-light-gray">
         <div className="max-w-3xl mx-auto flex items-center gap-6 text-sm">
+          {/* manager */}
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-full flex items-center justify-center text-white font-semibold text-sm" style={{ backgroundColor: colorFor(meeting.manager?.id || meeting.manager?.full_name) }}>
               {initials(meeting.manager?.full_name)}
@@ -194,6 +224,8 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
               <div className="font-semibold">{meeting.manager?.full_name || 'Manager'}</div>
             </div>
           </div>
+
+          {/* report */}
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-full flex items-center justify-center text-white font-semibold text-sm" style={{ backgroundColor: colorFor(meeting.report?.id || meeting.report?.full_name) }}>
               {initials(meeting.report?.full_name)}
@@ -202,6 +234,47 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
               <div className="text-xs text-gray uppercase">Report</div>
               <div className="font-semibold">{meeting.report?.full_name || 'TBD'}</div>
             </div>
+          </div>
+
+          {/* extra participants */}
+          {extraProfiles.map(p => (
+            <div key={p.id} className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-full flex items-center justify-center text-white font-semibold text-sm" style={{ backgroundColor: colorFor(p.id || p.full_name) }}>{initials(p.full_name)}</div>
+              <div>
+                <div className="text-xs text-gray uppercase">Participant</div>
+                <div className="font-semibold">{p.full_name || p.email}</div>
+              </div>
+            </div>
+          ))}
+
+          <div className="ml-auto flex items-center gap-2">
+            <input value={addingEmail} onChange={e => setAddingEmail(e.target.value)} placeholder="Add participant email" className="border border-light-gray rounded px-3 py-1 text-sm" />
+            <button onClick={async () => {
+              if (!addingEmail) return
+              setAddingState('loading')
+              try {
+                const { createClient } = await import('@/lib/supabase')
+                const supabase = createClient()
+                const { data: profile, error } = await supabase.from('profiles').select('id, full_name, email').eq('email', addingEmail).maybeSingle()
+                if (error) throw error
+                if (!profile) {
+                  setAddingState('error')
+                  return
+                }
+                // create placeholder segue and headline rows for this participant
+                await supabase.from('segue_notes').insert({ meeting_id: meeting.id, user_id: profile.id, personal_win: '', professional_win: '' })
+                await supabase.from('headlines').insert({ meeting_id: meeting.id, user_id: profile.id, content: '' })
+                setAddingEmail('')
+                setAddingState('done')
+                // refresh local data
+                await refetch()
+                // fetch extra profiles again below by effect
+              } catch (err) {
+                // eslint-disable-next-line no-console
+                console.error('Add participant failed', err)
+                setAddingState('error')
+              }
+            }} className={`py-1 px-3 rounded bg-steel-blue text-white text-sm ${addingState==='loading' ? 'opacity-70' : ''}`}>Add</button>
           </div>
         </div>
       </div>
