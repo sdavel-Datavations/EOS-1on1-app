@@ -11,9 +11,17 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
+  const commit = process.env.NEXT_PUBLIC_COMMIT_SHA || ''
   return (
     <html lang="en" className="h-full antialiased">
-      <body className="min-h-full flex flex-col bg-bg font-sans">{children}</body>
+      <body className="min-h-full flex flex-col bg-bg font-sans">
+        {children}
+        {commit && (
+          <div style={{ position: 'fixed', right: 12, bottom: 12, background: 'rgba(0,0,0,0.6)', color: '#fff', padding: '6px 8px', borderRadius: 6, fontSize: 12, zIndex: 9999 }}>
+            {`commit: ${commit}`}
+          </div>
+        )}
+      </body>
     </html>
-  );
+  )
 }
