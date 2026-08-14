@@ -64,12 +64,23 @@ export default function Home() {
             <button
               onClick={async () => {
                 setError('')
-                if (showAuth === 'login') {
-                  const { error } = await signIn(email, password)
-                  if (error) setError(error.message)
-                } else {
-                  const { error } = await signUp(email, password, fullName)
-                  if (error) setError(error.message)
+                try {
+                  if (showAuth === 'login') {
+                    const res = await signIn(email, password)
+                    // safe logging for debugging (no secrets)
+                    // eslint-disable-next-line no-console
+                    console.log('signIn response', { status: res?.error ? 'error' : 'ok', error: res?.error?.message })
+                    if (res?.error) setError(res.error.message)
+                  } else {
+                    const res = await signUp(email, password, fullName)
+                    // eslint-disable-next-line no-console
+                    console.log('signUp response', { status: res?.error ? 'error' : 'ok', error: res?.error?.message })
+                    if (res?.error) setError(res.error.message)
+                  }
+                } catch (err) {
+                  // eslint-disable-next-line no-console
+                  console.error('Auth action failed', err)
+                  setError('Authentication failed — check console for details')
                 }
               }}
               className="w-full bg-steel-blue text-white font-semibold py-2.5 rounded-lg hover:bg-[#25698f] transition"
