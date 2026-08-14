@@ -404,19 +404,6 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
                                 className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none"
                                 rows={2}
                               />
-                                defaultValue={note?.professional_win || ''}
-                                placeholder="Professional win..."
-                                onBlur={async e => {
-                                  const val = e.target.value
-                                  if (note?.id) {
-                                    await updateSegueNote(note.id, { professional_win: val })
-                                  } else {
-                                    await upsertSegueNote({ meeting_id: id, user_id: p.id, professional_win: val })
-                                  }
-                                }}
-                                className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none"
-                                rows={2}
-                              />
                             </>
                           </div>
                         )
