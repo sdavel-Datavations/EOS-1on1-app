@@ -40,11 +40,24 @@ export function useAuth() {
   }
 
   const signUp = async (email: string, password: string, fullName: string) => {
-    return getSupabase().auth.signUp({
+    const res = await getSupabase().auth.signUp({
       email,
       password,
       options: { data: { full_name: fullName } }
     })
+    // attempt dev auto-confirm for faster local E2E
+    await devAutoConfirm(email)
+    return res
+  }
+
+  // Dev convenience: auto-confirm emails when running locally to speed E2E
+  const devAutoConfirm = async (email: string) => {
+    if (process.env.NODE_ENV === 'production') return
+    try {
+      await fetch('/api/dev/confirm', { method: 'POST', body: JSON.stringify({ email }), headers: { 'Content-Type': 'application/json' } })
+    } catch (err) {
+      // ignore
+    }
   }
 
   const signOut = async () => {
