@@ -11,6 +11,18 @@ function initials(name?: string) {
   return name.split(' ').map(n => n[0]).slice(0,2).join('').toUpperCase()
 }
 
+function colorFor(key?: string) {
+  if (!key) return 'hsl(220 60% 45%)'
+  // simple deterministic hash to hue
+  let h = 0
+  for (let i = 0; i < key.length; i++) {
+    h = (h * 31 + key.charCodeAt(i)) >>> 0
+  }
+  const hue = h % 360
+  // use HSL with decent saturation/lightness
+  return `hsl(${hue} 60% 45%)`
+}
+
 export default function MeetingPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
   const { user } = useAuth()
@@ -174,7 +186,7 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
       <div className="px-6 py-3 bg-white border-b border-light-gray">
         <div className="max-w-3xl mx-auto flex items-center gap-6 text-sm">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-full flex items-center justify-center text-white font-semibold text-sm bg-steel-blue">
+            <div className="w-9 h-9 rounded-full flex items-center justify-center text-white font-semibold text-sm" style={{ backgroundColor: colorFor(meeting.manager?.id || meeting.manager?.full_name) }}>
               {initials(meeting.manager?.full_name)}
             </div>
             <div>
@@ -183,7 +195,7 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-full flex items-center justify-center text-white font-semibold text-sm bg-medium-purple">
+            <div className="w-9 h-9 rounded-full flex items-center justify-center text-white font-semibold text-sm" style={{ backgroundColor: colorFor(meeting.report?.id || meeting.report?.full_name) }}>
               {initials(meeting.report?.full_name)}
             </div>
             <div>
@@ -281,7 +293,7 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
                       <div>
                         <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center gap-2">
-                            <div className="w-7 h-7 rounded-full flex items-center justify-center text-white font-semibold text-xs bg-steel-blue">{initials(meeting.manager?.full_name)}</div>
+                            <div className="w-7 h-7 rounded-full flex items-center justify-center text-white font-semibold text-xs" style={{ backgroundColor: colorFor(meeting.manager?.id || meeting.manager?.full_name) }}>{initials(meeting.manager?.full_name)}</div>
                             <label className="text-[11px] font-bold uppercase tracking-wide text-medium-purple">{meeting.manager?.full_name || 'Manager'}</label>
                           </div>
                           <span className="text-xs text-gray">Manager</span>
@@ -328,7 +340,7 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
                       <div>
                         <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center gap-2">
-                            <div className="w-7 h-7 rounded-full flex items-center justify-center text-white font-semibold text-xs bg-medium-purple">{initials(meeting.report?.full_name)}</div>
+                            <div className="w-7 h-7 rounded-full flex items-center justify-center text-white font-semibold text-xs" style={{ backgroundColor: colorFor(meeting.report?.id || meeting.report?.full_name) }}>{initials(meeting.report?.full_name)}</div>
                             <label className="text-[11px] font-bold uppercase tracking-wide text-medium-purple">{meeting.report?.full_name || 'Report'}</label>
                           </div>
                           <span className="text-xs text-gray">Report</span>
@@ -402,7 +414,7 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
                       <div>
                         <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center gap-2">
-                            <div className="w-7 h-7 rounded-full flex items-center justify-center text-white font-semibold text-xs bg-steel-blue">{initials(meeting.manager?.full_name)}</div>
+                            <div className="w-7 h-7 rounded-full flex items-center justify-center text-white font-semibold text-xs" style={{ backgroundColor: colorFor(meeting.manager?.id || meeting.manager?.full_name) }}>{initials(meeting.manager?.full_name)}</div>
                             <label className="text-[11px] font-bold uppercase tracking-wide text-medium-purple">{meeting.manager?.full_name || 'Manager'}</label>
                           </div>
                           <span className="text-xs text-gray">Manager</span>
@@ -431,7 +443,7 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
                       <div>
                         <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center gap-2">
-                            <div className="w-7 h-7 rounded-full flex items-center justify-center text-white font-semibold text-xs bg-medium-purple">{initials(meeting.report?.full_name)}</div>
+                            <div className="w-7 h-7 rounded-full flex items-center justify-center text-white font-semibold text-xs" style={{ backgroundColor: colorFor(meeting.report?.id || meeting.report?.full_name) }}>{initials(meeting.report?.full_name)}</div>
                             <label className="text-[11px] font-bold uppercase tracking-wide text-medium-purple">{meeting.report?.full_name || 'Report'}</label>
                           </div>
                           <span className="text-xs text-gray">Report</span>
