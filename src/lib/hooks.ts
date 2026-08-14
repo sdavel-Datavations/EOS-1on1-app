@@ -47,6 +47,14 @@ export function useAuth() {
     })
     // attempt dev auto-confirm for faster local E2E
     await devAutoConfirm(email)
+    // In dev, attempt to sign the user in after confirmation so UI updates immediately
+    if (process.env.NODE_ENV !== 'production') {
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const signInRes = await getSupabase().auth.signInWithPassword({ email, password })
+        if (!signInRes.error) return signInRes
+        await new Promise(r => setTimeout(r, 300))
+      }
+    }
     return res
   }
 
