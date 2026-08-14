@@ -163,6 +163,20 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
         </div>
       </header>
 
+      {/* Participants */}
+      <div className="px-6 py-3 bg-white border-b border-light-gray">
+        <div className="max-w-3xl mx-auto flex items-center gap-4 text-sm">
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray uppercase">Manager</span>
+            <span className="font-semibold">{meeting.manager?.full_name || 'Manager'}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray uppercase">Report</span>
+            <span className="font-semibold">{meeting.report?.full_name || 'TBD'}</span>
+          </div>
+        </div>
+      </div>
+
       {/* Progress Bar */}
       <div className="flex gap-1 px-6 py-3 bg-white border-b border-light-gray">
         {SECTIONS.map((_, i) => (
@@ -264,7 +278,10 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
                     </div>
                     {theirSegue && (
                       <div className="bg-bg rounded-lg p-3">
-                        <label className="text-[11px] font-bold uppercase tracking-wide text-gray mb-1 block">Their wins</label>
+                        <div className="flex items-center justify-between">
+                          <label className="text-[11px] font-bold uppercase tracking-wide text-gray mb-1 block">Their wins</label>
+                          <span className="text-xs text-gray">{meeting.manager_id === theirSegue.user_id ? meeting.manager?.full_name : meeting.report?.full_name}</span>
+                        </div>
                         <p className="text-sm">{theirSegue.personal_win || <span className="text-light-gray italic">Not yet filled in</span>}</p>
                         <p className="text-sm mt-1">{theirSegue.professional_win || <span className="text-light-gray italic">Not yet filled in</span>}</p>
                       </div>
@@ -307,7 +324,10 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
                     </div>
                     {theirHeadline && (
                       <div className="bg-bg rounded-lg p-3">
-                        <label className="text-[11px] font-bold uppercase tracking-wide text-gray mb-1 block">Their headlines</label>
+                        <div className="flex items-center justify-between">
+                          <label className="text-[11px] font-bold uppercase tracking-wide text-gray mb-1 block">Their headlines</label>
+                          <span className="text-xs text-gray">{meeting.manager_id === theirHeadline.user_id ? meeting.manager?.full_name : meeting.report?.full_name}</span>
+                        </div>
                         <p className="text-sm whitespace-pre-wrap">{theirHeadline.content || <span className="text-light-gray italic">Not yet filled in</span>}</p>
                       </div>
                     )}
