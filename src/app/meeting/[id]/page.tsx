@@ -135,10 +135,12 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
     )
   }
 
-  const mySegue = segueNotes.find((n: SegueNote) => n.user_id === user.id)
-  const theirSegue = segueNotes.find((n: SegueNote) => n.user_id !== user.id)
-  const myHeadline = headlines.find((h: Headline) => h.user_id === user.id)
-  const theirHeadline = headlines.find((h: Headline) => h.user_id !== user.id)
+  const managerSegue = segueNotes.find((n: SegueNote) => n.user_id === meeting.manager_id)
+  const reportSegue = segueNotes.find((n: SegueNote) => n.user_id === meeting.report_id)
+  const managerHeadline = headlines.find((h: Headline) => h.user_id === meeting.manager_id)
+  const reportHeadline = headlines.find((h: Headline) => h.user_id === meeting.report_id)
+  const amManager = user.id === meeting.manager_id
+  const amReport = user.id === meeting.report_id
   const measurables = scorecardItems.filter((s: ScorecardItem) => s.item_type === 'measurable')
   const rocks = scorecardItems.filter((s: ScorecardItem) => s.item_type === 'rock')
   const carriedTodos = todos.filter((t: Todo) => !t.is_new)
@@ -259,33 +261,95 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
                     <p className="text-sm text-gray font-condensed leading-relaxed">
                       Each person shares one personal and one professional win from the past week.
                     </p>
-                    <div>
-                      <label className="text-[11px] font-bold uppercase tracking-wide text-medium-purple mb-1 block">Your wins</label>
-                      <textarea
-                        defaultValue={mySegue?.personal_win || ''}
-                        placeholder="Personal win..."
-                        onBlur={e => mySegue && updateSegueNote(mySegue.id, { personal_win: e.target.value })}
-                        className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none mb-2"
-                        rows={2}
-                      />
-                      <textarea
-                        defaultValue={mySegue?.professional_win || ''}
-                        placeholder="Professional win..."
-                        onBlur={e => mySegue && updateSegueNote(mySegue.id, { professional_win: e.target.value })}
-                        className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none"
-                        rows={2}
-                      />
-                    </div>
-                    {theirSegue && (
-                      <div className="bg-bg rounded-lg p-3">
-                        <div className="flex items-center justify-between">
-                          <label className="text-[11px] font-bold uppercase tracking-wide text-gray mb-1 block">Their wins</label>
-                          <span className="text-xs text-gray">{meeting.manager_id === theirSegue.user_id ? meeting.manager?.full_name : meeting.report?.full_name}</span>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* Manager column */}
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <label className="text-[11px] font-bold uppercase tracking-wide text-medium-purple">{meeting.manager?.full_name || 'Manager'}</label>
+                          <span className="text-xs text-gray">Manager</span>
                         </div>
-                        <p className="text-sm">{theirSegue.personal_win || <span className="text-light-gray italic">Not yet filled in</span>}</p>
-                        <p className="text-sm mt-1">{theirSegue.professional_win || <span className="text-light-gray italic">Not yet filled in</span>}</p>
+                        {managerSegue ? (
+                          <>
+                            {amManager ? (
+                              <>
+                                <textarea
+                                  defaultValue={managerSegue.personal_win || ''}
+                                  placeholder="Personal win..."
+                                  onBlur={e => updateSegueNote(managerSegue.id, { personal_win: e.target.value })}
+                                  className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none mb-2"
+                                  rows={2}
+                                />
+                                <textarea
+                                  defaultValue={managerSegue.professional_win || ''}
+                                  placeholder="Professional win..."
+                                  onBlur={e => updateSegueNote(managerSegue.id, { professional_win: e.target.value })}
+                                  className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none"
+                                  rows={2}
+                                />
+                              </>
+                            ) : (
+                              <>
+                                <p className="text-sm">{managerSegue.personal_win || <span className="text-light-gray italic">Not yet filled in</span>}</p>
+                                <p className="text-sm mt-1">{managerSegue.professional_win || <span className="text-light-gray italic">Not yet filled in</span>}</p>
+                              </>
+                            )}
+                          </>
+                        ) : (
+                          amManager ? (
+                            <>
+                              <textarea placeholder="Personal win..." className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none mb-2" rows={2} />
+                              <textarea placeholder="Professional win..." className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none" rows={2} />
+                            </>
+                          ) : (
+                            <p className="text-sm text-light-gray italic">Not yet filled in</p>
+                          )
+                        )}
                       </div>
-                    )}
+
+                      {/* Report column */}
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <label className="text-[11px] font-bold uppercase tracking-wide text-medium-purple">{meeting.report?.full_name || 'Report'}</label>
+                          <span className="text-xs text-gray">Report</span>
+                        </div>
+                        {reportSegue ? (
+                          <>
+                            {amReport ? (
+                              <>
+                                <textarea
+                                  defaultValue={reportSegue.personal_win || ''}
+                                  placeholder="Personal win..."
+                                  onBlur={e => updateSegueNote(reportSegue.id, { personal_win: e.target.value })}
+                                  className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none mb-2"
+                                  rows={2}
+                                />
+                                <textarea
+                                  defaultValue={reportSegue.professional_win || ''}
+                                  placeholder="Professional win..."
+                                  onBlur={e => updateSegueNote(reportSegue.id, { professional_win: e.target.value })}
+                                  className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none"
+                                  rows={2}
+                                />
+                              </>
+                            ) : (
+                              <>
+                                <p className="text-sm">{reportSegue.personal_win || <span className="text-light-gray italic">Not yet filled in</span>}</p>
+                                <p className="text-sm mt-1">{reportSegue.professional_win || <span className="text-light-gray italic">Not yet filled in</span>}</p>
+                              </>
+                            )}
+                          </>
+                        ) : (
+                          amReport ? (
+                            <>
+                              <textarea placeholder="Personal win..." className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none mb-2" rows={2} />
+                              <textarea placeholder="Professional win..." className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none" rows={2} />
+                            </>
+                          ) : (
+                            <p className="text-sm text-light-gray italic">Not yet filled in</p>
+                          )
+                        )}
+                      </div>
+                    </div>
                   </div>
                 )}
 
@@ -312,25 +376,59 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
                     <p className="text-sm text-gray font-condensed leading-relaxed">
                       Employee, customer, or operational news worth flagging — good or bad.
                     </p>
-                    <div>
-                      <label className="text-[11px] font-bold uppercase tracking-wide text-medium-purple mb-1 block">Your headlines</label>
-                      <textarea
-                        defaultValue={myHeadline?.content || ''}
-                        placeholder="News and updates..."
-                        onBlur={e => myHeadline && updateHeadline(myHeadline.id, e.target.value)}
-                        className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none"
-                        rows={3}
-                      />
-                    </div>
-                    {theirHeadline && (
-                      <div className="bg-bg rounded-lg p-3">
-                        <div className="flex items-center justify-between">
-                          <label className="text-[11px] font-bold uppercase tracking-wide text-gray mb-1 block">Their headlines</label>
-                          <span className="text-xs text-gray">{meeting.manager_id === theirHeadline.user_id ? meeting.manager?.full_name : meeting.report?.full_name}</span>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* Manager headlines */}
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <label className="text-[11px] font-bold uppercase tracking-wide text-medium-purple">{meeting.manager?.full_name || 'Manager'}</label>
+                          <span className="text-xs text-gray">Manager</span>
                         </div>
-                        <p className="text-sm whitespace-pre-wrap">{theirHeadline.content || <span className="text-light-gray italic">Not yet filled in</span>}</p>
+                        {managerHeadline ? (
+                          amManager ? (
+                            <textarea
+                              defaultValue={managerHeadline.content || ''}
+                              placeholder="News and updates..."
+                              onBlur={e => updateHeadline(managerHeadline.id, e.target.value)}
+                              className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none"
+                              rows={3}
+                            />
+                          ) : (
+                            <div className="bg-bg rounded-lg p-3"><p className="text-sm whitespace-pre-wrap">{managerHeadline.content || <span className="text-light-gray italic">Not yet filled in</span>}</p></div>
+                          )
+                        ) : (
+                          amManager ? (
+                            <textarea placeholder="News and updates..." className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none" rows={3} />
+                          ) : (
+                            <p className="text-sm text-light-gray italic">Not yet filled in</p>
+                          )}
                       </div>
-                    )}
+
+                      {/* Report headlines */}
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <label className="text-[11px] font-bold uppercase tracking-wide text-medium-purple">{meeting.report?.full_name || 'Report'}</label>
+                          <span className="text-xs text-gray">Report</span>
+                        </div>
+                        {reportHeadline ? (
+                          amReport ? (
+                            <textarea
+                              defaultValue={reportHeadline.content || ''}
+                              placeholder="News and updates..."
+                              onBlur={e => updateHeadline(reportHeadline.id, e.target.value)}
+                              className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none"
+                              rows={3}
+                            />
+                          ) : (
+                            <div className="bg-bg rounded-lg p-3"><p className="text-sm whitespace-pre-wrap">{reportHeadline.content || <span className="text-light-gray italic">Not yet filled in</span>}</p></div>
+                          )
+                        ) : (
+                          amReport ? (
+                            <textarea placeholder="News and updates..." className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none" rows={3} />
+                          ) : (
+                            <p className="text-sm text-light-gray italic">Not yet filled in</p>
+                          )}
+                      </div>
+                    </div>
                   </div>
                 )}
 
