@@ -6,6 +6,7 @@
     "dev": "CHOKIDAR_USEPOLLING=true next dev",
     "stop": "lsof -i :3000 -t | xargs -r kill || true",
     "smoke": "node ./scripts/smoke.js",
+    "test:e2e": "playwright test",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"
@@ -26,5 +27,7 @@
     "eslint-config-next": "16.3.1",
     "tailwindcss": "^4",
     "typescript": "^5"
+  ,
+    "@playwright/test": "^1.44.0"
   }
 }
