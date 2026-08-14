@@ -1,3 +1,4 @@
+import 'dotenv/config'
 import { Page } from '@playwright/test'
 import { createClient } from '@supabase/supabase-js'
 
