@@ -2,7 +2,7 @@
 
 import { use, useState, useEffect, useRef, useCallback } from 'react'
 import Link from 'next/link'
-import { useAuth, useMeeting, updateSegueNote, updateHeadline, upsertScorecardItem, deleteScorecardItem, upsertIssue, deleteIssue, upsertTodo, deleteTodo, updateMeeting, updateSectionTimer } from '@/lib/hooks'
+import { useAuth, useMeeting, updateSegueNote, upsertSegueNote, updateHeadline, upsertScorecardItem, deleteScorecardItem, upsertIssue, deleteIssue, upsertTodo, deleteTodo, updateMeeting, updateSectionTimer } from '@/lib/hooks'
 import { SECTIONS } from '@/lib/types'
 import type { ScorecardItem, Issue, Todo, SegueNote, Headline, SectionTimer } from '@/lib/types'
 
@@ -378,7 +378,6 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                       {participants.map(p => {
                         const note = segueNotes.find((n: SegueNote) => n.user_id === p.id)
-                        const am = user.id === p.id
                         return (
                           <div key={p.id}>
                             <div className="flex items-center justify-between mb-2">
@@ -389,40 +388,37 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
                               <span className="text-xs text-gray">{p.role}</span>
                             </div>
 
-                            {note ? (
-                              am ? (
-                                <>
-                                  <textarea
-                                    defaultValue={note.personal_win || ''}
-                                    placeholder="Personal win..."
-                                    onBlur={e => updateSegueNote(note.id, { personal_win: e.target.value })}
-                                    className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none mb-2"
-                                    rows={2}
-                                  />
-                                  <textarea
-                                    defaultValue={note.professional_win || ''}
-                                    placeholder="Professional win..."
-                                    onBlur={e => updateSegueNote(note.id, { professional_win: e.target.value })}
-                                    className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none"
-                                    rows={2}
-                                  />
-                                </>
-                              ) : (
-                                <>
-                                  <p className="text-sm">{note.personal_win || <span className="text-light-gray italic">Not yet filled in</span>}</p>
-                                  <p className="text-sm mt-1">{note.professional_win || <span className="text-light-gray italic">Not yet filled in</span>}</p>
-                                </>
-                              )
-                            ) : (
-                              am ? (
-                                <>
-                                  <textarea placeholder="Personal win..." className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none mb-2" rows={2} />
-                                  <textarea placeholder="Professional win..." className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none" rows={2} />
-                                </>
-                              ) : (
-                                <p className="text-sm text-light-gray italic">Not yet filled in</p>
-                              )
-                            )}
+                            {/* Editable by any participant to make this a single shared agenda */}
+                            <>
+                              <textarea
+                                defaultValue={note?.personal_win || ''}
+                                placeholder="Personal win..."
+                                onBlur={async e => {
+                                  const val = e.target.value
+                                  if (note?.id) {
+                                    await updateSegueNote(note.id, { personal_win: val })
+                                  } else {
+                                    await upsertSegueNote({ meeting_id: id, user_id: p.id, personal_win: val })
+                                  }
+                                }}
+                                className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none mb-2"
+                                rows={2}
+                              />
+                              <textarea
+                                defaultValue={note?.professional_win || ''}
+                                placeholder="Professional win..."
+                                onBlur={async e => {
+                                  const val = e.target.value
+                                  if (note?.id) {
+                                    await updateSegueNote(note.id, { professional_win: val })
+                                  } else {
+                                    await upsertSegueNote({ meeting_id: id, user_id: p.id, professional_win: val })
+                                  }
+                                }}
+                                className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none"
+                                rows={2}
+                              />
+                            </>
                           </div>
                         )
                       })}

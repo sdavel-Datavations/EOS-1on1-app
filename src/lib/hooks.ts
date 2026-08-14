@@ -206,6 +206,16 @@ export async function updateSegueNote(id: string, fields: Partial<SegueNote>) {
   return getSupabase().from('segue_notes').update(fields).eq('id', id)
 }
 
+export async function upsertSegueNote(item: Partial<SegueNote> & { meeting_id?: string; user_id?: string }) {
+  const sb = getSupabase()
+  if (item.id) {
+    return sb.from('segue_notes').update(item).eq('id', item.id)
+  }
+  // create new
+  const insert = { meeting_id: item.meeting_id, user_id: item.user_id, personal_win: item.personal_win || '', professional_win: item.professional_win || '' }
+  return sb.from('segue_notes').insert(insert).select().single()
+}
+
 export async function updateHeadline(id: string, content: string) {
   return getSupabase().from('headlines').update({ content }).eq('id', id)
 }
