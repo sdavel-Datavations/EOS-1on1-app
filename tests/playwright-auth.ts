@@ -33,19 +33,28 @@ export async function seedAndLogin(page: Page, email: string, password: string, 
 
   // create user via dev admin endpoint (no confirmation emails)
   try {
-    await fetch('http://localhost:3000/api/dev/create-user', {
+    const resp = await fetch('http://localhost:3000/api/dev/create-user', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password, fullName }),
     })
+    try {
+      const j = await resp.json()
+      // eslint-disable-next-line no-console
+      console.log('dev create-user response', j)
+    } catch (e) {
+      // ignore
+    }
   } catch (err) {
     // ignore
   }
 
   // sign in via anon key to get a session
   const sb = createClient(baseUrl, anon)
-  const { data: signInData } = await sb.auth.signInWithPassword({ email, password })
-  const session = signInData?.session || null
+  const signInRes = await sb.auth.signInWithPassword({ email, password })
+  // eslint-disable-next-line no-console
+  console.log('signInRes', JSON.stringify(signInRes?.error ? { error: signInRes.error } : { ok: !!signInRes.data }))
+  const session = signInRes?.data?.session || null
 
   // compute storage key used by supabase-js
   const projRef = new URL(baseUrl).hostname.split('.')[0]
