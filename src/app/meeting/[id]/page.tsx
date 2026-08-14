@@ -6,6 +6,11 @@ import { useAuth, useMeeting, updateSegueNote, updateHeadline, upsertScorecardIt
 import { SECTIONS } from '@/lib/types'
 import type { ScorecardItem, Issue, Todo, SegueNote, Headline, SectionTimer } from '@/lib/types'
 
+function initials(name?: string) {
+  if (!name) return ''
+  return name.split(' ').map(n => n[0]).slice(0,2).join('').toUpperCase()
+}
+
 export default function MeetingPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
   const { user } = useAuth()
@@ -167,14 +172,24 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
 
       {/* Participants */}
       <div className="px-6 py-3 bg-white border-b border-light-gray">
-        <div className="max-w-3xl mx-auto flex items-center gap-4 text-sm">
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-gray uppercase">Manager</span>
-            <span className="font-semibold">{meeting.manager?.full_name || 'Manager'}</span>
+        <div className="max-w-3xl mx-auto flex items-center gap-6 text-sm">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-full flex items-center justify-center text-white font-semibold text-sm bg-steel-blue">
+              {initials(meeting.manager?.full_name)}
+            </div>
+            <div>
+              <div className="text-xs text-gray uppercase">Manager</div>
+              <div className="font-semibold">{meeting.manager?.full_name || 'Manager'}</div>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-gray uppercase">Report</span>
-            <span className="font-semibold">{meeting.report?.full_name || 'TBD'}</span>
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-full flex items-center justify-center text-white font-semibold text-sm bg-medium-purple">
+              {initials(meeting.report?.full_name)}
+            </div>
+            <div>
+              <div className="text-xs text-gray uppercase">Report</div>
+              <div className="font-semibold">{meeting.report?.full_name || 'TBD'}</div>
+            </div>
           </div>
         </div>
       </div>
@@ -265,7 +280,10 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
                       {/* Manager column */}
                       <div>
                         <div className="flex items-center justify-between mb-2">
-                          <label className="text-[11px] font-bold uppercase tracking-wide text-medium-purple">{meeting.manager?.full_name || 'Manager'}</label>
+                          <div className="flex items-center gap-2">
+                            <div className="w-7 h-7 rounded-full flex items-center justify-center text-white font-semibold text-xs bg-steel-blue">{initials(meeting.manager?.full_name)}</div>
+                            <label className="text-[11px] font-bold uppercase tracking-wide text-medium-purple">{meeting.manager?.full_name || 'Manager'}</label>
+                          </div>
                           <span className="text-xs text-gray">Manager</span>
                         </div>
                         {managerSegue ? (
@@ -309,7 +327,10 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
                       {/* Report column */}
                       <div>
                         <div className="flex items-center justify-between mb-2">
-                          <label className="text-[11px] font-bold uppercase tracking-wide text-medium-purple">{meeting.report?.full_name || 'Report'}</label>
+                          <div className="flex items-center gap-2">
+                            <div className="w-7 h-7 rounded-full flex items-center justify-center text-white font-semibold text-xs bg-medium-purple">{initials(meeting.report?.full_name)}</div>
+                            <label className="text-[11px] font-bold uppercase tracking-wide text-medium-purple">{meeting.report?.full_name || 'Report'}</label>
+                          </div>
                           <span className="text-xs text-gray">Report</span>
                         </div>
                         {reportSegue ? (
@@ -380,7 +401,10 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
                       {/* Manager headlines */}
                       <div>
                         <div className="flex items-center justify-between mb-2">
-                          <label className="text-[11px] font-bold uppercase tracking-wide text-medium-purple">{meeting.manager?.full_name || 'Manager'}</label>
+                          <div className="flex items-center gap-2">
+                            <div className="w-7 h-7 rounded-full flex items-center justify-center text-white font-semibold text-xs bg-steel-blue">{initials(meeting.manager?.full_name)}</div>
+                            <label className="text-[11px] font-bold uppercase tracking-wide text-medium-purple">{meeting.manager?.full_name || 'Manager'}</label>
+                          </div>
                           <span className="text-xs text-gray">Manager</span>
                         </div>
                         {managerHeadline ? (
@@ -406,7 +430,10 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
                       {/* Report headlines */}
                       <div>
                         <div className="flex items-center justify-between mb-2">
-                          <label className="text-[11px] font-bold uppercase tracking-wide text-medium-purple">{meeting.report?.full_name || 'Report'}</label>
+                          <div className="flex items-center gap-2">
+                            <div className="w-7 h-7 rounded-full flex items-center justify-center text-white font-semibold text-xs bg-medium-purple">{initials(meeting.report?.full_name)}</div>
+                            <label className="text-[11px] font-bold uppercase tracking-wide text-medium-purple">{meeting.report?.full_name || 'Report'}</label>
+                          </div>
                           <span className="text-xs text-gray">Report</span>
                         </div>
                         {reportHeadline ? (
