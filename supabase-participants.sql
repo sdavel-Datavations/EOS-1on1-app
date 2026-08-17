@@ -106,9 +106,21 @@ create policy "Participants can remove membership" on public.meeting_participant
   using (public.can_access_meeting(meeting_id));
 
 -- ── Policies: meetings ──
+-- These must NOT go through can_access_meeting(), even though every child table
+-- does. That function re-queries public.meetings, and a command cannot see its
+-- own uncommitted row — so on `insert ... returning` (which is what
+-- .insert().select() emits) the lookup finds nothing and the SELECT policy
+-- rejects the returned row with 42501, breaking meeting creation entirely.
+-- Comparing the row's own columns works because RLS evaluates them against the
+-- candidate row. is_meeting_participant() is safe here: it reads
+-- meeting_participants, not meetings.
 drop policy if exists "Meeting participants can view" on public.meetings;
 create policy "Meeting participants can view" on public.meetings for select
-  using (public.can_access_meeting(id));
+  using (
+    manager_id = auth.uid()
+    or report_id = auth.uid()
+    or public.is_meeting_participant(id)
+  );
 
 drop policy if exists "Meeting participants can insert" on public.meetings;
 create policy "Meeting participants can insert" on public.meetings for insert
@@ -116,7 +128,11 @@ create policy "Meeting participants can insert" on public.meetings for insert
 
 drop policy if exists "Meeting participants can update" on public.meetings;
 create policy "Meeting participants can update" on public.meetings for update
-  using (public.can_access_meeting(id));
+  using (
+    manager_id = auth.uid()
+    or report_id = auth.uid()
+    or public.is_meeting_participant(id)
+  );
 
 -- ── Policies: child tables ──
 -- FOR ALL with no WITH CHECK reuses the USING expression for inserts.
