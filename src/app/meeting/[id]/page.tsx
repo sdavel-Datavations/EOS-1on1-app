@@ -2,7 +2,7 @@
 
 import { use, useState, useEffect, useRef, useCallback } from 'react'
 import Link from 'next/link'
-import { useAuth, useMeeting, updateSegueNote, upsertSegueNote, updateHeadline, upsertHeadline, upsertScorecardItem, deleteScorecardItem, upsertIssue, deleteIssue, upsertTodo, deleteTodo, updateMeeting, updateSectionTimer, useCommitments, createCommitment, updateCommitment, setCommitmentStatus, describeCommitmentError, addParticipantByEmail, removeParticipant, useExtractedItems, acceptExtractedItem, rejectExtractedItem } from '@/lib/hooks'
+import { useAuth, useMeeting, updateSegueNote, upsertSegueNote, updateHeadline, upsertHeadline, upsertScorecardItem, deleteScorecardItem, upsertIssue, deleteIssue, upsertTodo, deleteTodo, updateMeeting, updateSectionTimer, useCommitments, createCommitment, updateCommitment, setCommitmentStatus, describeCommitmentError, addParticipantByEmail, removeParticipant, useExtractedItems, importActionItems, acceptExtractedItem, rejectExtractedItem } from '@/lib/hooks'
 import { SECTIONS } from '@/lib/types'
 import type { ScorecardItem, Issue, Todo, SegueNote, Headline, SectionTimer, ParticipantRole, ExtractedItem } from '@/lib/types'
 
@@ -340,15 +340,17 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
             {participantsError} Showing the manager and report only until then.
           </div>
         )}
-        {/* Transcript → next steps */}
+        {/* Action items from the notetaker → review queue */}
         <div className="bg-white rounded-xl border border-light-gray p-6">
-          <h2 className="text-lg font-bold text-deep-purple mb-2">Next Steps from Transcript</h2>
+          <h2 className="text-lg font-bold text-deep-purple mb-2">Import Next Steps</h2>
           <p className="text-sm text-gray mb-4">
-            Paste a transcript to pull out the commitments that were actually made. Nothing lands on
-            the agenda until you accept it.
+            Paste the action items Granola or Gemini already produced, one per line. Owners and due
+            dates are read where they're stated, and anything already on this agenda is flagged as a
+            duplicate. Nothing lands on the agenda until you accept it.
           </p>
-          <TranscriptExtraction
+          <ActionItemImport
             meetingId={id}
+            meetingDate={meeting.meeting_date}
             participants={participants}
             currentUserId={user.id}
             onAccepted={refetch}
@@ -699,11 +701,12 @@ function TodoList({ todos, meetingId, isNew, onUpdate }: {
 }
 
 // ── Transcript extraction + review queue ──
-function TranscriptExtraction({ meetingId, participants, currentUserId, onAccepted }: {
-  meetingId: string, participants: Participant[], currentUserId: string, onAccepted: () => void
+function ActionItemImport({ meetingId, meetingDate, participants, currentUserId, onAccepted }: {
+  meetingId: string, meetingDate: string, participants: Participant[], currentUserId: string, onAccepted: () => void
 }) {
   const { items, loading, error: loadError, refetch } = useExtractedItems(meetingId)
-  const [transcript, setTranscript] = useState('')
+  const [pasted, setPasted] = useState('')
+  const [target, setTarget] = useState<'commitment' | 'todo' | 'issue'>('commitment')
   const [extracting, setExtracting] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -715,31 +718,34 @@ function TranscriptExtraction({ meetingId, participants, currentUserId, onAccept
     return p?.full_name || p?.email || 'Unknown'
   }
 
-  const extract = async () => {
-    if (!transcript.trim() || extracting) return
+  const runImport = async () => {
+    if (!pasted.trim() || extracting) return
     setExtracting(true)
     setActionError(null)
     setNotice(null)
-    try {
-      const res = await fetch('/api/extract', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ meeting_id: meetingId, transcript, source: 'upload' }),
-      })
-      const json = await res.json()
-      if (!res.ok) {
-        setActionError(json.error || 'Extraction failed')
-      } else {
-        setTranscript('')
-        setNotice(json.count === 0
-          ? 'No commitments found in that transcript.'
-          : `Found ${json.count} item${json.count === 1 ? '' : 's'} to review.`)
-        await refetch()
-      }
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error('Extraction request failed', err)
-      setActionError('Could not reach the extraction service.')
+
+    const { count, duplicates, error } = await importActionItems({
+      meetingId,
+      rawText: pasted,
+      target,
+      // Only real participants can own an item, so an unrecognised name stays
+      // unassigned rather than being guessed at.
+      participants: participants.map(p => ({ id: p.id, full_name: p.full_name, email: p.email })),
+      userId: currentUserId,
+      referenceDate: meetingDate,
+    })
+
+    if (error) {
+      setActionError(error)
+    } else if (count === 0) {
+      setNotice("Nothing read from that. Put one action item per line — bullets, numbers and checkboxes are all fine.")
+    } else {
+      setPasted('')
+      setNotice(
+        `${count} item${count === 1 ? '' : 's'} to review` +
+          (duplicates > 0 ? ` · ${duplicates} flagged as already on the agenda` : ''),
+      )
+      await refetch()
     }
     setExtracting(false)
   }
@@ -788,13 +794,11 @@ function TranscriptExtraction({ meetingId, participants, currentUserId, onAccept
                     <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-[#e8f0fe] text-steel-blue">
                       {targetLabel[item.target]}
                     </span>
-                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
-                      item.confidence === 'high' ? 'bg-green-light text-green'
-                      : item.confidence === 'medium' ? 'bg-amber-light text-[#e67e22]'
-                      : 'bg-red-light text-coral-red'
-                    }`}>
-                      {item.confidence.toUpperCase()}
-                    </span>
+                    {!item.owner_id && (
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-light-gray text-gray">
+                        NO OWNER READ
+                      </span>
+                    )}
                     {item.duplicate_of_id && (
                       <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-light text-[#e67e22]">
                         POSSIBLE DUPLICATE
@@ -834,22 +838,31 @@ function TranscriptExtraction({ meetingId, participants, currentUserId, onAccept
       )}
 
       <textarea
-        value={transcript}
-        onChange={e => setTranscript(e.target.value)}
-        placeholder="Paste the full meeting transcript (from Granola, Gemini, or anywhere else)..."
+        value={pasted}
+        onChange={e => setPasted(e.target.value)}
+        placeholder={'Paste action items, one per line:\n- Sam: send the Q3 scorecard by Friday\n- Ashley to draft the hiring plan\n- Book the vendor call'}
         rows={5}
         className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-y focus:border-steel-blue focus:outline-none"
       />
-      <div className="flex items-center justify-between mt-2">
-        <span className="text-xs text-gray">
-          The transcript is not stored — only the items you accept.
-        </span>
+      <div className="flex items-center justify-between mt-2 gap-3 flex-wrap">
+        <div className="flex items-center gap-2">
+          <label className="text-[11px] font-bold uppercase tracking-wide text-gray">Add as</label>
+          <select
+            value={target}
+            onChange={e => setTarget(e.target.value as 'commitment' | 'todo' | 'issue')}
+            className="border border-light-gray rounded-lg px-2 py-1.5 text-sm focus:border-steel-blue focus:outline-none"
+          >
+            <option value="commitment">Commitments</option>
+            <option value="todo">To-dos</option>
+            <option value="issue">Issues</option>
+          </select>
+        </div>
         <button
-          onClick={extract}
-          disabled={extracting || !transcript.trim()}
+          onClick={runImport}
+          disabled={extracting || !pasted.trim()}
           className="bg-medium-purple text-white font-semibold px-4 py-2 rounded-lg text-sm hover:bg-deep-purple transition disabled:opacity-50"
         >
-          {extracting ? 'Extracting...' : 'Extract next steps'}
+          {extracting ? 'Reading...' : 'Review next steps'}
         </button>
       </div>
     </div>

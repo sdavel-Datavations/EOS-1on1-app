@@ -12,7 +12,7 @@
      Until this runs, a meeting shows just its manager and report, and anyone added
      as a third participant cannot open it. Safe to re-run.
    - `supabase-transcripts.sql` — the `extracted_items` review queue behind
-     "Next Steps from Transcript". Depends on the access function created by
+     "Import Next Steps". Depends on the access function created by
      `supabase-participants.sql`, so run it after. Safe to re-run.
    - `supabase-delete-meetings.sql` — lets the organiser delete a meeting, and
      repairs the `todos.carried_from_id` foreign key so the cascade doesn't fail
@@ -45,31 +45,8 @@ NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key-here
 ```
 
-`ANTHROPIC_API_KEY` is additionally required for "Next Steps from Transcript".
-It is read server-side only and never reaches the browser.
-
-This is **API billing** — metered pay-per-token against the Anthropic
-organization the key belongs to. It is not the same meter as a Claude
-subscription, and it does not draw from Claude Code usage limits. Use an ordinary
-key (`sk-ant-api…`), never an Admin key (`sk-ant-admin…`), and prefer a dedicated
-workspace with a spend limit so this app's spend is attributable and capped.
-
-What leaves your infrastructure on each call: the transcript, participant names
-and roles (falling back to email address where no name is set), and the titles of
-items already on that agenda. The app never stores the full transcript — but the
-short verbatim quote in each item's `evidence` field does persist in
-`extracted_items`.
-
-`EXTRACTION_MODEL` defaults to `claude-sonnet-5`. Every extracted item lands in a
-review queue a human confirms before it reaches the agenda, so a wrong item costs
-a click, whereas latency is paid on every upload with someone waiting. Set it to
-`claude-opus-5` to compare on a real transcript; the response reports which model
-ran.
-
-There is currently **no transcript size cap and no rate limit** on
-`/api/extract`. Any signed-in participant can submit an arbitrarily long
-transcript, repeatedly. A workspace spend limit is the backstop until that is
-fixed.
+No third-party AI key is needed. Next steps come from the action-item list your
+notetaker already produced — see "Import Next Steps" below.
 
 ```bash
 npm install
@@ -168,6 +145,24 @@ https://your-app.vercel.app/**
 to you or by you, across all meetings, grouped Overdue / Due today / Due this week /
 Later / No due date. Add a task that came up mid-week and it lives here with no
 meeting attached. Ticking one off records when, so "Done this week" is a real list.
+
+**Import Next Steps (on the meeting page)** — Paste the action-item list Granola,
+Gemini, or Otter already produced at the end of the meeting, one per line. No AI
+key and no per-token billing: the notetaker's AI already did that work, and
+reading its output is a formatting problem.
+
+It handles bullets, numbers, and markdown checkboxes; skips the notetaker's own
+headings ("Action Items:", "Next Steps"); treats a ticked box as already done;
+and collapses items repeated between a summary and a list. Owners are read from
+`Sam: …`, `[Sam] …`, `Sam — …`, or a trailing `(Sam)`, and matched only against
+real meeting participants — an unrecognised name stays unassigned rather than
+being guessed at. Due dates are read from ISO dates, `Aug 21`, `today`,
+`tomorrow`, and weekday names; vague ones like "by EOW" are deliberately left
+alone, because a wrong date on someone's task is worse than none.
+
+Every item lands in a review queue and reaches the agenda only when you accept
+it. Each row shows the line it was parsed from, flags anything already on the
+agenda as a possible duplicate, and marks items where no owner could be read.
 
 **Meeting page (/meeting/[id])** — The 5-section EOS agenda:
 1. **Segue** — Both users prep personal + professional wins independently

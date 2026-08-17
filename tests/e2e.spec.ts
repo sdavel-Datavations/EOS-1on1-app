@@ -1,5 +1,5 @@
 import { test, expect, Page } from '@playwright/test'
-import { seedAndLogin, createUser, login, baseUrl, commitmentsTableExists, participantsTableExists, trackerReady } from './playwright-auth'
+import { seedAndLogin, createUser, login, baseUrl, tableExists, commitmentsTableExists, participantsTableExists, trackerReady } from './playwright-auth'
 
 async function signInAndStartMeeting(page: Page, name = 'E2E User') {
   const email = `e2e+${Date.now()}@example.com`
@@ -130,22 +130,6 @@ test('cancelling a delete leaves the meeting alone', async ({ page }) => {
   await expect(card).toBeVisible()
 })
 
-test('extraction endpoint rejects unauthenticated callers', async ({ request }) => {
-  // The whole point of the server-auth foundation: a route handler that holds an
-  // API key must know who is calling. No session cookie => no extraction.
-  const res = await request.post(`${baseUrl()}/api/extract`, {
-    data: { meeting_id: '00000000-0000-0000-0000-000000000000', transcript: 'Sam: I will send the numbers.' },
-  })
-  expect(res.status()).toBe(401)
-  expect((await res.json()).error).toContain('Not signed in')
-})
-
-test('extraction endpoint validates its input', async ({ request }) => {
-  const res = await request.post(`${baseUrl()}/api/extract`, { data: { transcript: 'x' } })
-  expect(res.status()).toBe(400)
-  expect((await res.json()).error).toContain('required')
-})
-
 test('weekly commitments save through RLS', async ({ page }) => {
   test.skip(
     !(await commitmentsTableExists()),
@@ -261,4 +245,50 @@ test('an emailed done link refuses a token it did not sign', async ({ request })
   expect(body).toContain('no longer valid')
   // A GET must never complete a task: mail scanners fetch links unprompted.
   expect(body).not.toContain('is closed')
+})
+
+test('pasted action items land in the review queue, deduped', async ({ page }) => {
+  test.skip(
+    !(await tableExists('extracted_items')),
+    'extracted_items table missing — run supabase-transcripts.sql in the Supabase SQL editor',
+  )
+
+  await signInAndStartMeeting(page, 'Import Tester')
+
+  // A commitment already on the agenda, so the paste has something to collide with
+  await page.getByPlaceholder('Commitment title').fill('Send the Q3 scorecard')
+  await page.getByRole('button', { name: 'Add Commitment' }).click()
+  await expect(page.getByText('Send the Q3 scorecard')).toBeVisible({ timeout: 10000 })
+
+  // The list a notetaker produces: a heading, an owner, a due date, and a repeat
+  // of something already tracked.
+  await page.getByPlaceholder(/Paste action items/).fill(
+    [
+      'Action Items:',
+      '- Import Tester: book the vendor call by Friday',
+      '- Draft the hiring plan',
+      '- Send the Q3 scorecard',
+    ].join('\n'),
+  )
+  await page.getByRole('button', { name: 'Review next steps' }).click()
+
+  // Three items read, the repeat flagged rather than silently dropped
+  await expect(page.getByText(/3 items to review/)).toBeVisible({ timeout: 15000 })
+  await expect(page.getByText(/1 flagged as already on the agenda/)).toBeVisible()
+  await expect(page.getByText('POSSIBLE DUPLICATE')).toBeVisible()
+
+  // exact, because each row also quotes the raw pasted line as provenance and a
+  // substring match would hit both the title and the blockquote.
+  await expect(page.getByText('book the vendor call', { exact: true })).toBeVisible()
+  // The owner was matched to a participant and the date read off "by Friday"
+  await expect(page.getByText('Import Tester · Due 2026-08-21')).toBeVisible()
+  await expect(page.getByText('Draft the hiring plan', { exact: true })).toBeVisible()
+  // An unattributed line stays unassigned rather than being guessed at
+  await expect(page.getByText('NO OWNER READ').first()).toBeVisible()
+
+  // Nothing reaches the agenda until accepted — that is the whole point of the queue
+  await expect(page.getByText(/Pending review \(3\)/)).toBeVisible()
+
+  await page.getByRole('button', { name: 'Accept' }).first().click()
+  await expect(page.getByText(/Pending review \(2\)/)).toBeVisible({ timeout: 15000 })
 })

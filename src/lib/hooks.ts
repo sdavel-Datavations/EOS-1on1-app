@@ -1,5 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { createClient } from './supabase'
+import { findExactDuplicate, type ExistingItem } from './dedupe'
+import { parseActionItems, resolveOwner } from './parse-action-items'
 import type { Meeting, SegueNote, ScorecardItem, Headline, Issue, Todo, SectionTimer, Profile, Commitment, TrackedCommitment, Teammate, MeetingParticipant, ParticipantRole, ExtractedItem } from './types'
 
 function getSupabase() {
@@ -578,6 +580,76 @@ export async function updateCommitment(id: string, fields: Partial<Commitment>) 
     return { error: { message: 'That change did not save — you may not have access to this commitment.' } }
   }
   return { error: null }
+}
+
+// ── Action-item import ──
+/**
+ * Turns a pasted action-item list into pending review-queue rows.
+ *
+ * Granola, Gemini and Otter already produce this list with the AI you're paying
+ * for there, so nothing here calls a model. Parsing is a formatting problem;
+ * every item still goes to the same queue a human confirms before it reaches the
+ * shared agenda.
+ */
+export async function importActionItems(args: {
+  meetingId: string
+  rawText: string
+  target: 'commitment' | 'todo' | 'issue'
+  participants: { id: string; full_name?: string; email?: string }[]
+  userId: string
+  /** Anchors relative dates like "by Friday" — the meeting's own date. */
+  referenceDate: string
+  sourceRef?: string | null
+}): Promise<{ count: number; duplicates: number; error: string | null }> {
+  const parsed = parseActionItems(args.rawText, args.referenceDate)
+  if (parsed.length === 0) {
+    return { count: 0, duplicates: 0, error: null }
+  }
+
+  const sb = getSupabase()
+
+  // What's already on the agenda, so a re-paste doesn't duplicate it.
+  const [todoRes, commitmentRes] = await Promise.all([
+    sb.from('todos').select('id, text').eq('meeting_id', args.meetingId).eq('done', false),
+    sb.from('weekly_commitments').select('id, title').eq('meeting_id', args.meetingId).eq('status', 'open'),
+  ])
+
+  const existing: ExistingItem[] = [
+    ...(todoRes.data || []).map(t => ({ kind: 'todo' as const, id: t.id as string, text: t.text as string })),
+    ...(commitmentRes.data || []).map(c => ({ kind: 'commitment' as const, id: c.id as string, text: c.title as string })),
+  ].filter(e => e.text?.trim())
+
+  const rows = parsed.map(item => {
+    const owner = resolveOwner(item.ownerName, args.participants)
+    const duplicate = findExactDuplicate(item.title, existing)
+    return {
+      meeting_id: args.meetingId,
+      source: 'upload',
+      source_ref: args.sourceRef || null,
+      extracted_by: args.userId,
+      target: args.target,
+      title: item.title,
+      owner_id: owner?.id ?? null,
+      due_date: item.dueDate,
+      // The line exactly as pasted. There is no model quote to show, and the
+      // original wording is what a reviewer needs to judge a mangled parse.
+      evidence: item.raw,
+      duplicate_of_kind: duplicate?.kind ?? null,
+      duplicate_of_id: duplicate?.id ?? null,
+      status: 'pending' as const,
+    }
+  })
+
+  const { data, error } = await sb.from('extracted_items').insert(rows).select('id')
+  if (error) {
+    return { count: 0, duplicates: 0, error: describeExtractionError(error) }
+  }
+
+  return {
+    count: data?.length ?? 0,
+    duplicates: rows.filter(r => r.duplicate_of_id).length,
+    error: null,
+  }
 }
 
 // ── Extraction review queue ──

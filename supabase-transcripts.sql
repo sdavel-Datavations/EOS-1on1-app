@@ -1,13 +1,20 @@
--- EOS 1-on-1 — transcript extraction review queue
+-- EOS 1-on-1 — next-steps review queue
 -- Run this in the Supabase SQL Editor AFTER supabase-participants.sql
 -- (it depends on the can_access_meeting() function defined there).
 -- Safe to re-run.
 --
--- Design note: transcripts are NOT stored. Granola (or the uploaded file) is the
--- source of truth, and a 1-on-1 transcript is personnel data — compensation,
--- performance, complaints about colleagues. What persists is the extracted item
--- plus a short evidence excerpt, which is what a human needs in order to accept
--- or reject it. `source_ref` records where it came from so it can be re-fetched.
+-- Design note: transcripts are NOT stored. Granola (or whichever notetaker ran)
+-- is the source of truth, and a 1-on-1 transcript is personnel data —
+-- compensation, performance, complaints about colleagues. What persists is the
+-- proposed item plus the single line it was read from, which is what a human
+-- needs in order to accept or reject it. `source_ref` records where it came from.
+--
+-- Items are parsed from the action-item list the notetaker already produced; no
+-- model is called. `confidence` is therefore unused and left at its default —
+-- kept rather than dropped so no existing row loses data. What the reviewer
+-- actually needs to know is whether an owner was matched (owner_id) and whether
+-- it looks like something already on the agenda (duplicate_of_id), both of which
+-- the UI shows.
 
 create table if not exists public.extracted_items (
   id uuid primary key default gen_random_uuid(),
