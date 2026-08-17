@@ -129,6 +129,7 @@ export default function Home() {
         <div className="bg-white rounded-xl border border-light-gray p-6 mb-8">
           <h2 className="text-lg font-bold text-deep-purple mb-1">New Meeting</h2>
           <div className="w-14 h-[3px] bg-steel-blue rounded mb-4" />
+          {error && <div className="bg-red-light text-coral-red text-sm p-3 rounded-lg mb-4">{error}</div>}
           <div className="flex gap-3 items-end flex-wrap">
             <div>
               <label className="text-[11px] font-bold uppercase tracking-wide text-gray block mb-1">Direct Report Email</label>
@@ -136,7 +137,7 @@ export default function Home() {
                 type="email"
                 placeholder="ashley@datavations.com"
                 value={reportEmail}
-                onChange={e => setReportEmail(e.target.value)}
+                onChange={e => { setReportEmail(e.target.value); setError('') }}
                 className="border border-light-gray rounded-lg px-3 py-2 text-sm w-64 focus:border-steel-blue focus:outline-none"
               />
             </div>
@@ -144,13 +145,20 @@ export default function Home() {
               disabled={creating}
               onClick={async () => {
                 setCreating(true)
+                setError('')
                 // Look up report by email
                 let reportId = null
-                if (reportEmail) {
+                if (reportEmail.trim()) {
                   const { createClient } = await import('@/lib/supabase')
                   const supabase = createClient()
-                  const { data } = await supabase.from('profiles').select('id').eq('email', reportEmail).single()
-                  reportId = data?.id || null
+                  const { data } = await supabase.from('profiles').select('id').eq('email', reportEmail.trim().toLowerCase()).maybeSingle()
+                  if (!data) {
+                    // Don't silently create a meeting with an empty report seat
+                    setError(`No account for ${reportEmail.trim()} — they need to sign up first, or leave the field blank.`)
+                    setCreating(false)
+                    return
+                  }
+                  reportId = data.id
                 }
                 const today = new Date().toISOString().split('T')[0]
                 const { data } = await createMeeting(user.id, reportId, today)
@@ -169,7 +177,7 @@ export default function Home() {
 
         {/* Search */}
         <div className="mb-6">
-          <SearchBar userId={user.id} />
+          <SearchBar />
         </div>
 
         {/* Past Meetings */}
@@ -224,7 +232,7 @@ export default function Home() {
 }
 
 // ── Search Component ──
-function SearchBar({ userId }: { userId: string }) {
+function SearchBar() {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<{ issues: any[]; todos: any[] } | null>(null)
   const [searching, setSearching] = useState(false)
@@ -233,7 +241,7 @@ function SearchBar({ userId }: { userId: string }) {
     if (!query.trim()) return
     setSearching(true)
     const { searchPastMeetings } = await import('@/lib/hooks')
-    const r = await searchPastMeetings(userId, query)
+    const r = await searchPastMeetings(query)
     setResults(r)
     setSearching(false)
   }

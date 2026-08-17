@@ -25,37 +25,33 @@ function loadDotenvIfNeeded() {
   }
 }
 
+export function baseUrl() {
+  return process.env.DEPLOY_URL || 'http://localhost:3000'
+}
+
 /**
- * True once supabase-commitments.sql has been applied. PostgREST answers with
- * PGRST205 while the table is absent from the schema cache.
+ * True once the migration creating `table` has been applied. PostgREST answers
+ * with PGRST205 while a table is absent from the schema cache.
  */
-export async function commitmentsTableExists() {
+export async function tableExists(table: string) {
   loadDotenvIfNeeded()
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
   if (!url || !anon) return false
-  const res = await fetch(`${url}/rest/v1/weekly_commitments?select=id&limit=1`, {
+  const res = await fetch(`${url}/rest/v1/${table}?select=id&limit=1`, {
     headers: { apikey: anon, Authorization: `Bearer ${anon}` },
   })
   if (res.ok) return true
-  const body = await res.text()
-  return !body.includes('PGRST205')
+  return !(await res.text()).includes('PGRST205')
 }
 
-/**
- * Creates a pre-confirmed user via the dev admin endpoint, then signs in through
- * the app's own login form.
- *
- * We deliberately do NOT inject a session directly: @supabase/ssr's
- * createBrowserClient persists sessions in document.cookie (chunked, base64-
- * prefixed), so seeding localStorage has no effect and the app stays logged out.
- * Driving the real form keeps this independent of supabase's storage format.
- */
-export async function seedAndLogin(page: Page, email: string, password: string, fullName = '') {
-  loadDotenvIfNeeded()
+export const commitmentsTableExists = () => tableExists('weekly_commitments')
+export const participantsTableExists = () => tableExists('meeting_participants')
 
-  const baseURL = process.env.DEPLOY_URL || 'http://localhost:3000'
-  const resp = await fetch(`${baseURL}/api/dev/create-user`, {
+/** Creates a pre-confirmed user, so tests never wait on confirmation email. */
+export async function createUser(email: string, password: string, fullName = '') {
+  loadDotenvIfNeeded()
+  const resp = await fetch(`${baseUrl()}/api/dev/create-user`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password, fullName }),
@@ -63,7 +59,17 @@ export async function seedAndLogin(page: Page, email: string, password: string, 
   if (!resp.ok) {
     throw new Error(`dev create-user failed (${resp.status}): ${await resp.text()}`)
   }
+}
 
+/**
+ * Signs in through the app's own form.
+ *
+ * We deliberately do NOT inject a session directly: @supabase/ssr's
+ * createBrowserClient persists sessions in document.cookie (chunked, base64-
+ * prefixed), so seeding localStorage has no effect and the app stays logged out.
+ * Driving the real form keeps this independent of supabase's storage format.
+ */
+export async function login(page: Page, email: string, password: string) {
   await page.goto('/')
   await page.getByPlaceholder('Email').fill(email)
   await page.getByPlaceholder('Password').fill(password)
@@ -71,6 +77,11 @@ export async function seedAndLogin(page: Page, email: string, password: string, 
 
   // The dashboard replaces the auth card once the session is established
   await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible({ timeout: 15000 })
+}
+
+export async function seedAndLogin(page: Page, email: string, password: string, fullName = '') {
+  await createUser(email, password, fullName)
+  await login(page, email, password)
 }
 
 export default seedAndLogin

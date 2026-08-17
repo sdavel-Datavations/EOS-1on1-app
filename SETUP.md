@@ -7,6 +7,10 @@
    - `supabase-schema.sql` — core tables, RLS policies, and the new-user trigger
    - `supabase-commitments.sql` — the `weekly_commitments` table used by the Weekly
      Commitments panel. Until this runs, that panel shows a "table not found" notice.
+   - `supabase-participants.sql` — the `meeting_participants` table, plus the policies
+     that grant meeting access by membership rather than by manager/report only.
+     Until this runs, a meeting shows just its manager and report, and anyone added
+     as a third participant cannot open it. Safe to re-run.
 3. Go to **Authentication > Providers** and make sure **Email** is enabled
 4. Go to **Settings > API** and copy:
    - **Project URL** (e.g. `https://abcdef.supabase.co`)

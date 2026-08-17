@@ -19,6 +19,17 @@ export interface Meeting {
   report?: Profile
 }
 
+export type ParticipantRole = 'manager' | 'report' | 'participant'
+
+export interface MeetingParticipant {
+  id: string
+  meeting_id: string
+  user_id: string
+  role: ParticipantRole
+  // Joined field
+  profile?: Profile
+}
+
 export interface SegueNote {
   id: string
   meeting_id: string

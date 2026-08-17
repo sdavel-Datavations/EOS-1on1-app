@@ -2,11 +2,18 @@
 
 import { use, useState, useEffect, useRef, useCallback } from 'react'
 import Link from 'next/link'
-import { useAuth, useMeeting, updateSegueNote, upsertSegueNote, updateHeadline, upsertHeadline, upsertScorecardItem, deleteScorecardItem, upsertIssue, deleteIssue, upsertTodo, deleteTodo, updateMeeting, updateSectionTimer, useCommitments, createCommitment, updateCommitment, describeCommitmentError } from '@/lib/hooks'
+import { useAuth, useMeeting, updateSegueNote, upsertSegueNote, updateHeadline, upsertHeadline, upsertScorecardItem, deleteScorecardItem, upsertIssue, deleteIssue, upsertTodo, deleteTodo, updateMeeting, updateSectionTimer, useCommitments, createCommitment, updateCommitment, describeCommitmentError, addParticipantByEmail, removeParticipant } from '@/lib/hooks'
 import { SECTIONS } from '@/lib/types'
-import type { ScorecardItem, Issue, Todo, SegueNote, Headline, SectionTimer } from '@/lib/types'
+import type { ScorecardItem, Issue, Todo, SegueNote, Headline, SectionTimer, ParticipantRole } from '@/lib/types'
 
-type Participant = { id: string; full_name: string; role: string; email?: string }
+type Participant = {
+  membershipId: string
+  id: string
+  full_name: string
+  role: string
+  email?: string
+  removable: boolean
+}
 
 function initials(name?: string) {
   if (!name) return ''
@@ -47,7 +54,7 @@ function ParticipantLabel({ participant }: { participant: Participant }) {
 export default function MeetingPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
   const { user } = useAuth()
-  const { meeting, segueNotes, scorecardItems, headlines, issues, todos, timers, loading, refetch } = useMeeting(id)
+  const { meeting, participants: memberships, participantsError, segueNotes, scorecardItems, headlines, issues, todos, timers, loading, refetch } = useMeeting(id)
 
   // Timer state
   const [masterStart, setMasterStart] = useState<number | null>(null)
@@ -60,33 +67,9 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // Participant state — must stay above the loading early-return so hook order is stable
-  const [extraProfiles, setExtraProfiles] = useState<{ id: string; full_name: string; email: string }[]>([])
   const [addingEmail, setAddingEmail] = useState('')
-  const [addingState, setAddingState] = useState<'idle' | 'loading' | 'error' | 'done'>('idle')
-
-  // Derive extra participants from any segue/headline rows that aren't manager or report
-  useEffect(() => {
-    if (!meeting) return
-    const ids = new Set<string>()
-    segueNotes.forEach(n => ids.add(n.user_id))
-    headlines.forEach(h => ids.add(h.user_id))
-    const extra = Array.from(ids).filter(uid => uid && uid !== meeting.manager_id && uid !== meeting.report_id)
-    if (extra.length === 0) {
-      setExtraProfiles([])
-      return
-    }
-    ;(async () => {
-      try {
-        const { createClient } = await import('@/lib/supabase')
-        const supabase = createClient()
-        const { data } = await supabase.from('profiles').select('id, full_name, email').in('id', extra)
-        setExtraProfiles(data || [])
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.error('Failed to load extra profiles', err)
-      }
-    })()
-  }, [meeting, segueNotes, headlines])
+  const [adding, setAdding] = useState(false)
+  const [participantError, setParticipantError] = useState<string | null>(null)
 
   // Load saved timer state
   useEffect(() => {
@@ -194,6 +177,21 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
     return `${m}:${String(s).padStart(2, '0')}`
   }
 
+  const addParticipant = async () => {
+    const email = addingEmail.trim()
+    if (!email || adding) return
+    setAdding(true)
+    setParticipantError(null)
+    const { error } = await addParticipantByEmail(id, email)
+    if (error) {
+      setParticipantError(error)
+    } else {
+      setAddingEmail('')
+      await refetch()
+    }
+    setAdding(false)
+  }
+
   if (loading || !meeting || !user) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -207,12 +205,28 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
   const carriedTodos = todos.filter((t: Todo) => !t.is_new)
   const newTodos = todos.filter((t: Todo) => t.is_new)
 
-  // assemble participants (manager, report, extras) for multi-person sections
-  const participants: { id: string; full_name: string; role: string; email?: string }[] = [
-    ...(meeting.manager ? [{ id: meeting.manager.id, full_name: meeting.manager.full_name, role: 'Manager' }] : []),
-    ...(meeting.report ? [{ id: meeting.report.id, full_name: meeting.report.full_name, role: 'Report' }] : []),
-    ...extraProfiles.map(p => ({ id: p.id, full_name: p.full_name, email: p.email, role: 'Participant' }))
+  // Participants come from meeting_participants — the same rows RLS keys access off.
+  // Manager first, then report, then everyone else, so sections read consistently.
+  const roleRank: Record<ParticipantRole, number> = { manager: 0, report: 1, participant: 2 }
+  const roleLabel: Record<ParticipantRole, string> = { manager: 'Manager', report: 'Report', participant: 'Participant' }
+  const memberParticipants: Participant[] = [...memberships]
+    .sort((a, b) => roleRank[a.role] - roleRank[b.role])
+    .map(m => ({
+      membershipId: m.id,
+      id: m.user_id,
+      full_name: m.profile?.full_name || '',
+      email: m.profile?.email,
+      role: roleLabel[m.role],
+      removable: m.role === 'participant',
+    }))
+
+  // Fall back to the manager/report pair when membership rows are unavailable
+  // (e.g. supabase-participants.sql not applied yet) so the agenda still works.
+  const fallbackParticipants: Participant[] = [
+    ...(meeting.manager ? [{ membershipId: `manager-${meeting.manager.id}`, id: meeting.manager.id, full_name: meeting.manager.full_name, email: meeting.manager.email, role: 'Manager', removable: false }] : []),
+    ...(meeting.report ? [{ membershipId: `report-${meeting.report.id}`, id: meeting.report.id, full_name: meeting.report.full_name, email: meeting.report.email, role: 'Report', removable: false }] : []),
   ]
+  const participants = memberParticipants.length > 0 ? memberParticipants : fallbackParticipants
 
   return (
     <div className="min-h-screen">
@@ -235,76 +249,59 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
 
       {/* Participants */}
       <div className="px-6 py-3 bg-white border-b border-light-gray">
-        <div className="max-w-3xl mx-auto flex items-center gap-6 text-sm">
-          {/* manager */}
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-full flex items-center justify-center text-white font-semibold text-sm" style={{ backgroundColor: colorFor(meeting.manager?.id || meeting.manager?.full_name) }}>
-              {initials(meeting.manager?.full_name)}
-            </div>
-            <div>
-              <div className="text-xs text-gray uppercase">Manager</div>
-              <div className="font-semibold">{meeting.manager?.full_name || 'Manager'}</div>
-            </div>
-          </div>
-
-          {/* report */}
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-full flex items-center justify-center text-white font-semibold text-sm" style={{ backgroundColor: colorFor(meeting.report?.id || meeting.report?.full_name) }}>
-              {initials(meeting.report?.full_name)}
-            </div>
-            <div>
-              <div className="text-xs text-gray uppercase">Report</div>
-              <div className="font-semibold">{meeting.report?.full_name || 'TBD'}</div>
-            </div>
-          </div>
-
-          {/* extra participants */}
-          {extraProfiles.map(p => (
-            <div key={p.id} className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-full flex items-center justify-center text-white font-semibold text-sm" style={{ backgroundColor: colorFor(p.id || p.full_name) }}>{initials(p.full_name)}</div>
+        <div className="max-w-3xl mx-auto flex items-center gap-6 text-sm flex-wrap">
+          {participants.map(p => (
+            <div key={p.membershipId} className="flex items-center gap-3 group">
+              <div className="w-9 h-9 rounded-full flex items-center justify-center text-white font-semibold text-sm flex-shrink-0" style={{ backgroundColor: colorFor(p.id || p.full_name) }}>
+                {initials(p.full_name)}
+              </div>
               <div>
-                <div className="text-xs text-gray uppercase">Participant</div>
+                <div className="text-xs text-gray uppercase">{p.role}</div>
                 <div className="font-semibold">{p.full_name || p.email}</div>
               </div>
+              {p.removable && (
+                <button
+                  onClick={async () => {
+                    setParticipantError(null)
+                    const { error } = await removeParticipant(p.membershipId)
+                    if (error) setParticipantError(error.message)
+                    await refetch()
+                  }}
+                  title={`Remove ${p.full_name || p.email}`}
+                  className="text-light-gray hover:text-coral-red transition opacity-0 group-hover:opacity-100"
+                >
+                  &times;
+                </button>
+              )}
             </div>
           ))}
 
+          {/* The report seat is empty until someone is named */}
+          {!meeting.report_id && (
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-full bg-light-gray flex-shrink-0" />
+              <div>
+                <div className="text-xs text-gray uppercase">Report</div>
+                <div className="font-semibold text-gray">TBD</div>
+              </div>
+            </div>
+          )}
+
           <div className="ml-auto flex items-center gap-2">
-            {addingState === 'error' && <span className="text-xs text-coral-red">No account with that email</span>}
+            {participantError && <span className="text-xs text-coral-red max-w-xs">{participantError}</span>}
             <input
               value={addingEmail}
-              onChange={e => { setAddingEmail(e.target.value); setAddingState('idle') }}
+              onChange={e => { setAddingEmail(e.target.value); setParticipantError(null) }}
+              onKeyDown={e => { if (e.key === 'Enter') addParticipant() }}
               placeholder="Add participant email"
               className="border border-light-gray rounded px-3 py-1 text-sm focus:border-steel-blue focus:outline-none"
             />
             <button
-              disabled={addingState === 'loading' || !addingEmail}
-              onClick={async () => {
-              if (!addingEmail) return
-              setAddingState('loading')
-              try {
-                const { createClient } = await import('@/lib/supabase')
-                const supabase = createClient()
-                const { data: profile, error } = await supabase.from('profiles').select('id, full_name, email').eq('email', addingEmail.trim()).maybeSingle()
-                if (error) throw error
-                if (!profile) {
-                  setAddingState('error')
-                  return
-                }
-                // create placeholder segue and headline rows for this participant
-                await supabase.from('segue_notes').insert({ meeting_id: meeting.id, user_id: profile.id, personal_win: '', professional_win: '' })
-                await supabase.from('headlines').insert({ meeting_id: meeting.id, user_id: profile.id, content: '' })
-                setAddingEmail('')
-                setAddingState('done')
-                // refresh local data — the extraProfiles effect picks up the new user_id
-                await refetch()
-              } catch (err) {
-                // eslint-disable-next-line no-console
-                console.error('Add participant failed', err)
-                setAddingState('error')
-              }
-            }} className="py-1 px-3 rounded bg-steel-blue text-white text-sm hover:bg-[#25698f] transition disabled:opacity-50">
-              {addingState === 'loading' ? 'Adding...' : 'Add'}
+              disabled={adding || !addingEmail.trim()}
+              onClick={addParticipant}
+              className="py-1 px-3 rounded bg-steel-blue text-white text-sm hover:bg-[#25698f] transition disabled:opacity-50"
+            >
+              {adding ? 'Adding...' : 'Add'}
             </button>
           </div>
         </div>
@@ -338,6 +335,11 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
 
       {/* Sections */}
       <main className="max-w-3xl mx-auto px-4 py-6 space-y-4">
+        {participantsError && (
+          <div className="bg-amber-light text-[#e67e22] text-sm p-3 rounded-lg">
+            {participantsError} Showing the manager and report only until then.
+          </div>
+        )}
         {/* Weekly Commitments */}
         <div className="bg-white rounded-xl border border-light-gray p-6">
           <h2 className="text-lg font-bold text-deep-purple mb-2">Weekly Commitments</h2>

@@ -1,5 +1,5 @@
 import { test, expect, Page } from '@playwright/test'
-import { seedAndLogin, commitmentsTableExists } from './playwright-auth'
+import { seedAndLogin, createUser, login, commitmentsTableExists, participantsTableExists } from './playwright-auth'
 
 async function signInAndStartMeeting(page: Page, name = 'E2E User') {
   const email = `e2e+${Date.now()}@example.com`
@@ -44,6 +44,42 @@ test('meeting agenda renders and segue notes persist', async ({ page }) => {
   await expect(page.getByPlaceholder('Professional win...').first()).toHaveValue('Shipped the pipeline')
 
   expect(errors, `uncaught page errors: ${errors.join(' | ')}`).toEqual([])
+})
+
+test('an added participant can open the meeting', async ({ page }) => {
+  test.skip(
+    !(await participantsTableExists()),
+    'meeting_participants table missing — run supabase-participants.sql in the Supabase SQL editor',
+  )
+
+  const guestEmail = `guest+${Date.now()}@example.com`
+  const guestPassword = 'Password123!'
+  await createUser(guestEmail, guestPassword, 'Guest Participant')
+
+  // Manager creates the meeting and adds the guest
+  await signInAndStartMeeting(page, 'Meeting Owner')
+  const meetingUrl = page.url()
+
+  await page.getByPlaceholder('Add participant email').fill(guestEmail)
+  await page.getByRole('button', { name: 'Add' }).click()
+  await expect(page.getByText('Guest Participant').first()).toBeVisible({ timeout: 10000 })
+
+  // The guest gets their own segue box in the shared agenda
+  await expect(page.getByPlaceholder('Personal win...')).toHaveCount(2)
+
+  // The point of the participants table: the guest can actually load the meeting.
+  // Under the old manager/report-only policies this hung on "Loading meeting...".
+  await page.getByRole('button', { name: 'Sign out' }).click()
+  await login(page, guestEmail, guestPassword)
+
+  // It also shows up in their meeting history, which RLS now scopes by membership
+  await expect(page.getByText('Meeting History')).toBeVisible()
+  await expect(page.getByText('Meeting Owner + TBD')).toBeVisible({ timeout: 10000 })
+
+  await page.goto(meetingUrl)
+  await expect(page.getByRole('heading', { name: 'Weekly Commitments' })).toBeVisible({ timeout: 15000 })
+  await expect(page.getByText('Loading meeting...')).toHaveCount(0)
+  await expect(page.getByPlaceholder('Personal win...')).toHaveCount(2)
 })
 
 test('weekly commitments save through RLS', async ({ page }) => {

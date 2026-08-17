@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { createClient } from './supabase'
-import type { Meeting, SegueNote, ScorecardItem, Headline, Issue, Todo, SectionTimer, Profile, Commitment } from './types'
+import type { Meeting, SegueNote, ScorecardItem, Headline, Issue, Todo, SectionTimer, Profile, Commitment, MeetingParticipant, ParticipantRole } from './types'
 
 function getSupabase() {
   return createClient()
@@ -95,11 +95,12 @@ export function useMeetings(userId: string | undefined) {
       setLoading(false)
       return
     }
+    // No manager_id/report_id filter: RLS already limits this to meetings the
+    // caller participates in, which also covers meetings they were added to.
     const sb = getSupabase()
     const { data } = await sb
       .from('meetings')
       .select('*, manager:profiles!meetings_manager_id_fkey(*), report:profiles!meetings_report_id_fkey(*)')
-      .or(`manager_id.eq.${userId},report_id.eq.${userId}`)
       .order('meeting_date', { ascending: false })
     setMeetings(data || [])
     setLoading(false)
@@ -113,6 +114,7 @@ export function useMeetings(userId: string | undefined) {
 // ── Single Meeting with all data ──
 export function useMeeting(meetingId: string) {
   const [meeting, setMeeting] = useState<Meeting | null>(null)
+  const [participants, setParticipants] = useState<MeetingParticipant[]>([])
   const [segueNotes, setSegueNotes] = useState<SegueNote[]>([])
   const [scorecardItems, setScorecardItems] = useState<ScorecardItem[]>([])
   const [headlines, setHeadlines] = useState<Headline[]>([])
@@ -120,11 +122,13 @@ export function useMeeting(meetingId: string) {
   const [todos, setTodos] = useState<Todo[]>([])
   const [timers, setTimers] = useState<SectionTimer[]>([])
   const [loading, setLoading] = useState(true)
+  const [participantsError, setParticipantsError] = useState<string | null>(null)
 
   const fetchAll = useCallback(async () => {
     const sb = getSupabase()
-    const [meetingRes, segueRes, scorecardRes, headlineRes, issueRes, todoRes, timerRes] = await Promise.all([
+    const [meetingRes, participantRes, segueRes, scorecardRes, headlineRes, issueRes, todoRes, timerRes] = await Promise.all([
       sb.from('meetings').select('*, manager:profiles!meetings_manager_id_fkey(*), report:profiles!meetings_report_id_fkey(*)').eq('id', meetingId).single(),
+      sb.from('meeting_participants').select('*, profile:profiles(*)').eq('meeting_id', meetingId).order('created_at'),
       sb.from('segue_notes').select('*').eq('meeting_id', meetingId),
       sb.from('scorecard_items').select('*').eq('meeting_id', meetingId).order('sort_order'),
       sb.from('headlines').select('*').eq('meeting_id', meetingId),
@@ -133,6 +137,8 @@ export function useMeeting(meetingId: string) {
       sb.from('section_timers').select('*').eq('meeting_id', meetingId),
     ])
     setMeeting(meetingRes.data)
+    setParticipants(participantRes.data || [])
+    setParticipantsError(participantRes.error ? describeParticipantError(participantRes.error) : null)
     setSegueNotes(segueRes.data || [])
     setScorecardItems(scorecardRes.data || [])
     setHeadlines(headlineRes.data || [])
@@ -145,9 +151,43 @@ export function useMeeting(meetingId: string) {
   useEffect(() => { fetchAll() }, [fetchAll])
 
   return {
-    meeting, segueNotes, scorecardItems, headlines, issues, todos, timers,
+    meeting, participants, participantsError, segueNotes, scorecardItems, headlines, issues, todos, timers,
     loading, refetch: fetchAll,
   }
+}
+
+// ── Participants ──
+export async function addParticipantByEmail(meetingId: string, email: string, role: ParticipantRole = 'participant') {
+  const sb = getSupabase()
+  const { data: profile, error: lookupError } = await sb
+    .from('profiles')
+    .select('id')
+    .eq('email', email.trim().toLowerCase())
+    .maybeSingle()
+
+  if (lookupError) return { error: lookupError.message }
+  if (!profile) return { error: 'No account with that email. They need to sign up first.' }
+
+  const { error } = await sb
+    .from('meeting_participants')
+    .insert({ meeting_id: meetingId, user_id: profile.id, role })
+
+  // 23505 = unique_violation on (meeting_id, user_id)
+  if (error && error.code === '23505') return { error: 'Already a participant.' }
+  if (error) return { error: describeParticipantError(error) }
+  return { error: null }
+}
+
+export async function removeParticipant(id: string) {
+  return getSupabase().from('meeting_participants').delete().eq('id', id)
+}
+
+/** PGRST205 means the table isn't in the schema cache — usually an unapplied migration. */
+export function describeParticipantError(error: { code?: string; message: string }) {
+  if (error.code === 'PGRST205') {
+    return 'Participants table not found — run supabase-participants.sql in the Supabase SQL editor.'
+  }
+  return error.message
 }
 
 // ── Create a new meeting + seed from previous ──
@@ -161,6 +201,13 @@ export async function createMeeting(managerId: string, reportId: string | null, 
     .single()
 
   if (error || !meeting) return { error }
+
+  // Seed membership — this is what grants access, so it goes first
+  const participantRows: { meeting_id: string; user_id: string; role: ParticipantRole }[] = [
+    { meeting_id: meeting.id, user_id: managerId, role: 'manager' },
+  ]
+  if (reportId) participantRows.push({ meeting_id: meeting.id, user_id: reportId, role: 'report' })
+  await sb.from('meeting_participants').insert(participantRows)
 
   // Seed section timers
   const sectionKeys = ['segue', 'scorecard', 'headlines', 'ids', 'todos']
@@ -178,15 +225,17 @@ export async function createMeeting(managerId: string, reportId: string | null, 
   if (reportId) headlineInserts.push({ meeting_id: meeting.id, user_id: reportId })
   await sb.from('headlines').insert(headlineInserts)
 
-  // Carry forward incomplete todos from previous meeting
-  const { data: prevMeeting } = await sb
+  // Carry forward from the previous meeting with this same pair — matching only
+  // on manager would pull one report's to-dos into another report's 1-on-1.
+  let prevQuery = sb
     .from('meetings')
     .select('id')
-    .or(`manager_id.eq.${managerId},report_id.eq.${managerId}`)
+    .eq('manager_id', managerId)
     .lt('meeting_date', date)
     .order('meeting_date', { ascending: false })
     .limit(1)
-    .single()
+  prevQuery = reportId ? prevQuery.eq('report_id', reportId) : prevQuery.is('report_id', null)
+  const { data: prevMeeting } = await prevQuery.maybeSingle()
 
   if (prevMeeting) {
     const { data: prevTodos } = await sb
@@ -371,22 +420,20 @@ export async function updateCommitment(id: string, fields: Partial<Commitment>) 
 }
 
 // ── Search past issues/discussions ──
-export async function searchPastMeetings(userId: string, query: string) {
+export async function searchPastMeetings(query: string) {
   const sb = getSupabase()
-  // Search issues
+  // The !inner join plus RLS on meetings scopes these to the caller's meetings,
+  // including ones they only participate in.
   const { data: issueResults } = await sb
     .from('issues')
     .select('*, meeting:meetings!inner(id, meeting_date, manager_id, report_id)')
-    .or(`manager_id.eq.${userId},report_id.eq.${userId}`, { referencedTable: 'meetings' })
     .ilike('description', `%${query}%`)
     .order('created_at', { ascending: false })
     .limit(20)
 
-  // Search todos
   const { data: todoResults } = await sb
     .from('todos')
     .select('*, meeting:meetings!inner(id, meeting_date, manager_id, report_id)')
-    .or(`manager_id.eq.${userId},report_id.eq.${userId}`, { referencedTable: 'meetings' })
     .ilike('text', `%${query}%`)
     .order('created_at', { ascending: false })
     .limit(20)
