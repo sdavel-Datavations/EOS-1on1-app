@@ -9,7 +9,6 @@
     NOTIFY_DAYS_BEFORE (optional, default 1)
 */
 
-import fetch from 'node-fetch'
 import pkg from '@supabase/supabase-js'
 import sgMail from '@sendgrid/mail'
 
@@ -38,6 +37,7 @@ async function run() {
     .from('weekly_commitments')
     .select('id, title, description, due_date, assignee_id, creator_id, meeting_id, notify_email, notify_slack')
     .eq('status', 'open')
+    .eq('notified', false) // without this every run re-notifies the same commitments
     .lte('due_date', dateStr)
 
   if (error) {

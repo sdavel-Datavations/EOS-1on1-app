@@ -3,7 +3,10 @@
 ## 1. Supabase Setup
 
 1. Go to [supabase.com/dashboard](https://supabase.com/dashboard) and open your project
-2. Navigate to **SQL Editor** and paste the contents of `supabase-schema.sql` — run it
+2. Navigate to **SQL Editor** and run these, in order:
+   - `supabase-schema.sql` — core tables, RLS policies, and the new-user trigger
+   - `supabase-commitments.sql` — the `weekly_commitments` table used by the Weekly
+     Commitments panel. Until this runs, that panel shows a "table not found" notice.
 3. Go to **Authentication > Providers** and make sure **Email** is enabled
 4. Go to **Settings > API** and copy:
    - **Project URL** (e.g. `https://abcdef.supabase.co`)
