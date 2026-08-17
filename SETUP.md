@@ -14,6 +14,10 @@
    - `supabase-transcripts.sql` — the `extracted_items` review queue behind
      "Next Steps from Transcript". Depends on the access function created by
      `supabase-participants.sql`, so run it after. Safe to re-run.
+   - `supabase-delete-meetings.sql` — lets the organiser delete a meeting, and
+     repairs the `todos.carried_from_id` foreign key so the cascade doesn't fail
+     on meetings whose to-dos were carried forward. Until this runs, the delete
+     button reports that nothing was deleted. Safe to re-run.
 3. Go to **Authentication > Providers** and make sure **Email** is enabled
 4. Go to **Settings > API** and copy:
    - **Project URL** (e.g. `https://abcdef.supabase.co`)

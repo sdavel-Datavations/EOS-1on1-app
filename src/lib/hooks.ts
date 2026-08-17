@@ -355,6 +355,24 @@ export async function updateMeeting(id: string, fields: Partial<Meeting>) {
   return getSupabase().from('meetings').update(fields).eq('id', id)
 }
 
+/**
+ * Deletes a meeting and, by FK cascade, everything on its agenda.
+ *
+ * Selects the deleted row back so a zero-row result can be reported. Without a
+ * DELETE policy RLS simply permits nothing and PostgREST still returns success,
+ * so "nothing happened" is otherwise indistinguishable from "deleted".
+ */
+export async function deleteMeeting(id: string) {
+  const { data, error } = await getSupabase().from('meetings').delete().eq('id', id).select('id')
+  if (error) return { error: error.message }
+  if (!data || data.length === 0) {
+    return {
+      error: 'Nothing was deleted. Run supabase-delete-meetings.sql in the Supabase SQL editor — and note only the meeting organiser can delete a meeting.',
+    }
+  }
+  return { error: null }
+}
+
 export async function updateSectionTimer(id: string, fields: Partial<SectionTimer>) {
   return getSupabase().from('section_timers').update(fields).eq('id', id)
 }

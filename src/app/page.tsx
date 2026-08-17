@@ -1,6 +1,6 @@
 'use client'
 
-import { useAuth, useMeetings, createMeeting } from '@/lib/hooks'
+import { useAuth, useMeetings, createMeeting, deleteMeeting } from '@/lib/hooks'
 import { getResolvedSupabaseUrl } from '@/lib/supabase'
 import { useState } from 'react'
 import Link from 'next/link'
@@ -16,6 +16,19 @@ export default function Home() {
   const [error, setError] = useState('')
   const [reportEmail, setReportEmail] = useState('')
   const [creating, setCreating] = useState(false)
+  const [confirmingId, setConfirmingId] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [deleteError, setDeleteError] = useState('')
+
+  const remove = async (meetingId: string) => {
+    setDeletingId(meetingId)
+    setDeleteError('')
+    const { error } = await deleteMeeting(meetingId)
+    if (error) setDeleteError(error)
+    setConfirmingId(null)
+    setDeletingId(null)
+    await refetch()
+  }
 
   if (authLoading) {
     return (
@@ -184,6 +197,10 @@ export default function Home() {
         <h2 className="text-lg font-bold text-deep-purple mb-1">Meeting History</h2>
         <div className="w-14 h-[3px] bg-steel-blue rounded mb-4" />
 
+        {deleteError && (
+          <div className="bg-red-light text-coral-red text-sm p-3 rounded-lg mb-4">{deleteError}</div>
+        )}
+
         {meetingsLoading ? (
           <p className="text-gray text-sm">Loading meetings...</p>
         ) : meetings.length === 0 ? (
@@ -217,6 +234,41 @@ export default function Home() {
                     <div className="flex items-center gap-3">
                       {m.rating && (
                         <span className="text-steel-blue font-bold text-lg">{m.rating}/10</span>
+                      )}
+                      {confirmingId === m.id ? (
+                        <div
+                          className="flex items-center gap-2"
+                          onClick={e => { e.preventDefault(); e.stopPropagation() }}
+                        >
+                          <span className="text-xs text-gray">Delete this meeting and its agenda?</span>
+                          <button
+                            onClick={() => remove(m.id)}
+                            disabled={deletingId === m.id}
+                            className="bg-coral-red text-white text-xs font-semibold px-2 py-1 rounded disabled:opacity-50"
+                          >
+                            {deletingId === m.id ? 'Deleting...' : 'Delete'}
+                          </button>
+                          <button
+                            onClick={() => setConfirmingId(null)}
+                            className="border border-light-gray text-gray text-xs font-semibold px-2 py-1 rounded"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={e => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            setDeleteError('')
+                            setConfirmingId(m.id)
+                          }}
+                          title="Delete meeting"
+                          aria-label="Delete meeting"
+                          className="text-light-gray hover:text-coral-red transition text-lg px-1 opacity-0 group-hover:opacity-100 focus:opacity-100"
+                        >
+                          &times;
+                        </button>
                       )}
                       <span className="text-light-gray group-hover:text-steel-blue transition text-xl">&rarr;</span>
                     </div>

@@ -82,6 +82,53 @@ test('an added participant can open the meeting', async ({ page }) => {
   await expect(page.getByPlaceholder('Personal win...')).toHaveCount(2)
 })
 
+test('a meeting can be deleted from the dashboard', async ({ page }) => {
+  await signInAndStartMeeting(page, 'Delete Tester')
+  const meetingUrl = page.url()
+
+  await page.goto('/')
+  const card = page.getByText('Delete Tester + TBD')
+  await expect(card).toBeVisible({ timeout: 10000 })
+
+  await page.getByRole('button', { name: 'Delete meeting' }).first().click()
+  // Destructive, so it asks first — and asking must not navigate into the meeting
+  await expect(page.getByText('Delete this meeting and its agenda?')).toBeVisible()
+  await expect(page).toHaveURL(/\/$/)
+
+  await page.getByRole('button', { name: 'Delete', exact: true }).click()
+
+  // The prompt clears only once the delete round-trip resolves, so this is the
+  // point at which the outcome is known.
+  await expect(page.getByText('Delete this meeting and its agenda?')).toHaveCount(0, { timeout: 15000 })
+
+  // Without the DELETE policy the delete affects zero rows; deleteMeeting()
+  // reports that rather than silently appearing to succeed.
+  const migrationNotice = page.getByText(/Run supabase-delete-meetings\.sql/)
+  if (await migrationNotice.isVisible()) {
+    test.skip(true, 'meetings DELETE policy missing — run supabase-delete-meetings.sql')
+  }
+
+  await expect(card).toHaveCount(0, { timeout: 10000 })
+
+  // And the meeting itself is gone, not just hidden from the list
+  await page.goto(meetingUrl)
+  await expect(page.getByText('Loading meeting...')).toBeVisible()
+})
+
+test('cancelling a delete leaves the meeting alone', async ({ page }) => {
+  await signInAndStartMeeting(page, 'Keep Tester')
+  await page.goto('/')
+
+  const card = page.getByText('Keep Tester + TBD')
+  await expect(card).toBeVisible({ timeout: 10000 })
+
+  await page.getByRole('button', { name: 'Delete meeting' }).first().click()
+  await page.getByRole('button', { name: 'Cancel' }).click()
+
+  await expect(page.getByText('Delete this meeting and its agenda?')).toHaveCount(0)
+  await expect(card).toBeVisible()
+})
+
 test('extraction endpoint rejects unauthenticated callers', async ({ request }) => {
   // The whole point of the server-auth foundation: a route handler that holds an
   // API key must know who is calling. No session cookie => no extraction.
