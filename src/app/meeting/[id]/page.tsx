@@ -2,7 +2,7 @@
 
 import { use, useState, useEffect, useRef, useCallback } from 'react'
 import Link from 'next/link'
-import { useAuth, useMeeting, updateSegueNote, upsertSegueNote, updateHeadline, upsertHeadline, upsertScorecardItem, deleteScorecardItem, upsertIssue, deleteIssue, upsertTodo, deleteTodo, updateMeeting, updateSectionTimer, useCommitments, createCommitment, updateCommitment, describeCommitmentError, addParticipantByEmail, removeParticipant, useExtractedItems, acceptExtractedItem, rejectExtractedItem } from '@/lib/hooks'
+import { useAuth, useMeeting, updateSegueNote, upsertSegueNote, updateHeadline, upsertHeadline, upsertScorecardItem, deleteScorecardItem, upsertIssue, deleteIssue, upsertTodo, deleteTodo, updateMeeting, updateSectionTimer, useCommitments, createCommitment, updateCommitment, setCommitmentStatus, describeCommitmentError, addParticipantByEmail, removeParticipant, useExtractedItems, acceptExtractedItem, rejectExtractedItem } from '@/lib/hooks'
 import { SECTIONS } from '@/lib/types'
 import type { ScorecardItem, Issue, Todo, SegueNote, Headline, SectionTimer, ParticipantRole, ExtractedItem } from '@/lib/types'
 
@@ -903,7 +903,9 @@ function WeeklyCommitments({ meetingId, participants, currentUserId }: {
   }
 
   const toggleDone = async (id: string, status: 'open' | 'done') => {
-    const { error } = await updateCommitment(id, { status: status === 'done' ? 'open' : 'done' })
+    // setCommitmentStatus, not updateCommitment: it stamps completed_at, which
+    // is what the tracker's "done this week" list reads.
+    const { error } = await setCommitmentStatus(id, status === 'done' ? 'open' : 'done')
     if (error) setSaveError(describeCommitmentError(error))
     await refetch()
   }

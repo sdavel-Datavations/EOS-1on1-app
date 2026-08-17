@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { createClient } from './supabase'
-import type { Meeting, SegueNote, ScorecardItem, Headline, Issue, Todo, SectionTimer, Profile, Commitment, MeetingParticipant, ParticipantRole, ExtractedItem } from './types'
+import type { Meeting, SegueNote, ScorecardItem, Headline, Issue, Todo, SectionTimer, Profile, Commitment, TrackedCommitment, Teammate, MeetingParticipant, ParticipantRole, ExtractedItem } from './types'
 
 function getSupabase() {
   return createClient()
@@ -444,6 +444,123 @@ export async function createCommitment(item: {
     })
     .select()
     .single()
+}
+
+/** A task added mid-week, belonging to no meeting. */
+export async function createStandaloneCommitment(item: {
+  creator_id: string
+  assignee_id: string
+  title: string
+  due_date?: string | null
+}) {
+  return getSupabase()
+    .from('weekly_commitments')
+    .insert({
+      meeting_id: null,
+      creator_id: item.creator_id,
+      assignee_id: item.assignee_id,
+      title: item.title,
+      description: '',
+      due_date: item.due_date || null,
+      notify_email: true,
+      notify_slack: false,
+    })
+    .select()
+    .single()
+}
+
+/**
+ * Toggle done/open. Stamps completed_at in the same write so the tracker can
+ * report what got finished this week — a status column alone can't say when.
+ */
+export async function setCommitmentStatus(id: string, status: 'open' | 'done') {
+  const result = await updateCommitment(id, {
+    status,
+    completed_at: status === 'done' ? new Date().toISOString() : null,
+  })
+  // Before supabase-weekly-tracker.sql runs there is no completed_at column.
+  // Ticking a box off is more important than recording when, so fall back to
+  // the status alone rather than failing the whole write.
+  if (result.error && isMissingColumn(result.error, 'completed_at')) {
+    return updateCommitment(id, { status })
+  }
+  return result
+}
+
+function isMissingColumn(error: { code?: string; message: string }, column: string) {
+  return (
+    (error.code === 'PGRST204' || /does not exist|could not find/i.test(error.message)) &&
+    error.message.includes(column)
+  )
+}
+
+/**
+ * Every commitment that is mine to do or mine to follow up on, across all
+ * meetings — the tracker's view. Commitments otherwise only surface inside the
+ * meeting that produced them, which is no use on a Wednesday.
+ */
+export function useMyCommitments(userId: string | undefined) {
+  const [commitments, setCommitments] = useState<TrackedCommitment[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const fetchMine = useCallback(async () => {
+    if (!userId) return
+    const { data, error } = await getSupabase()
+      .from('weekly_commitments')
+      .select('*, meeting:meetings(meeting_date)')
+      // Assigned to me, or assigned by me to someone else — a manager needs to
+      // see what he's waiting on, not just what he owes.
+      .or(`assignee_id.eq.${userId},creator_id.eq.${userId}`)
+      .order('due_date', { ascending: true, nullsFirst: false })
+    setError(error ? describeCommitmentError(error) : null)
+    setCommitments((data as TrackedCommitment[]) || [])
+    setLoading(false)
+  }, [userId])
+
+  useEffect(() => { fetchMine() }, [fetchMine])
+
+  return { commitments, loading, error, refetch: fetchMine }
+}
+
+/** People who share at least one meeting with this user — the plausible assignees. */
+export function useTeammates(userId: string | undefined) {
+  const [teammates, setTeammates] = useState<Teammate[]>([])
+
+  useEffect(() => {
+    if (!userId) return
+    let cancelled = false
+    ;(async () => {
+      const sb = getSupabase()
+      const { data: mine } = await sb
+        .from('meeting_participants')
+        .select('meeting_id')
+        .eq('user_id', userId)
+      const meetingIds = (mine || []).map(m => m.meeting_id)
+      if (meetingIds.length === 0) return
+
+      const { data: others } = await sb
+        .from('meeting_participants')
+        .select('user_id, profile:profiles(id, full_name, email)')
+        .in('meeting_id', meetingIds)
+        .neq('user_id', userId)
+
+      // PostgREST types an embedded relation as an array even when the FK makes
+      // it to-one, so normalise rather than assuming either shape.
+      const byId = new Map<string, Teammate>()
+      for (const row of others || []) {
+        const embedded = (row as unknown as { profile: Teammate | Teammate[] | null }).profile
+        const p = Array.isArray(embedded) ? embedded[0] : embedded
+        if (p?.id) byId.set(p.id, p)
+      }
+      if (!cancelled) {
+        setTeammates([...byId.values()].sort((a, b) => (a.full_name || '').localeCompare(b.full_name || '')))
+      }
+    })()
+    return () => { cancelled = true }
+  }, [userId])
+
+  return teammates
 }
 
 export async function updateCommitment(id: string, fields: Partial<Commitment>) {

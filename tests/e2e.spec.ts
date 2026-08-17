@@ -1,5 +1,5 @@
 import { test, expect, Page } from '@playwright/test'
-import { seedAndLogin, createUser, login, baseUrl, commitmentsTableExists, participantsTableExists } from './playwright-auth'
+import { seedAndLogin, createUser, login, baseUrl, commitmentsTableExists, participantsTableExists, trackerReady } from './playwright-auth'
 
 async function signInAndStartMeeting(page: Page, name = 'E2E User') {
   const email = `e2e+${Date.now()}@example.com`
@@ -169,4 +169,50 @@ test('weekly commitments save through RLS', async ({ page }) => {
   await expect(page.getByTitle('Mark as open')).toBeVisible({ timeout: 10000 })
   await page.reload()
   await expect(page.getByTitle('Mark as open')).toBeVisible({ timeout: 10000 })
+})
+
+test('the tracker holds mid-week tasks and commitments from meetings alike', async ({ page }) => {
+  test.skip(
+    !(await trackerReady()),
+    'completed_at column missing — run supabase-weekly-tracker.sql in the Supabase SQL editor',
+  )
+
+  const email = `tracker+${Date.now()}@example.com`
+  await seedAndLogin(page, email, 'Password123!', 'Tracker Tester')
+  await expect(page.getByRole('heading', { name: 'My Week' })).toBeVisible({ timeout: 10000 })
+
+  // A task typed straight into the tracker has no meeting behind it at all —
+  // the case the original RLS policy silently rejected, since it keyed off
+  // can_access_meeting(meeting_id) and meeting_id is null here.
+  await page.getByPlaceholder('Add a task for this week').fill('Chase the vendor invoice')
+  await page.getByRole('button', { name: 'Add Task' }).click()
+  await expect(page.getByText('Chase the vendor invoice')).toBeVisible({ timeout: 10000 })
+  await expect(page.getByText('You · No due date')).toBeVisible()
+
+  // It survives a reload, so it really persisted rather than only rendering
+  await page.reload()
+  await expect(page.getByText('Chase the vendor invoice')).toBeVisible({ timeout: 10000 })
+
+  // A commitment raised inside a 1-on-1 must show up in the same list, because
+  // the whole point is not having to reopen last week's meeting to find it
+  await page.getByRole('button', { name: 'Start 1-on-1' }).click()
+  await expect(page).toHaveURL(/.*\/meeting\/.+/)
+  await page.getByPlaceholder('Commitment title').fill('Send the Q3 scorecard')
+  await page.getByRole('button', { name: 'Add Commitment' }).click()
+  await expect(page.getByText('Send the Q3 scorecard')).toBeVisible({ timeout: 10000 })
+
+  await page.goto('/')
+  const fromMeeting = page.getByText('Send the Q3 scorecard')
+  await expect(fromMeeting).toBeVisible({ timeout: 10000 })
+  await expect(page.getByText('Chase the vendor invoice')).toBeVisible()
+
+  // Ticking it off moves it out of the open list and into "done this week"
+  await page.getByTitle('Mark as done').first().click()
+  await expect(page.getByRole('button', { name: /Done this week/ })).toBeVisible({ timeout: 10000 })
+
+  await page.reload()
+  const doneToggle = page.getByRole('button', { name: /Done this week · 1/ })
+  await expect(doneToggle).toBeVisible({ timeout: 10000 })
+  await doneToggle.click()
+  await expect(page.getByText('Done', { exact: true })).toBeVisible()
 })

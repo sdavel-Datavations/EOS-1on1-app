@@ -18,6 +18,10 @@
      repairs the `todos.carried_from_id` foreign key so the cascade doesn't fail
      on meetings whose to-dos were carried forward. Until this runs, the delete
      button reports that nothing was deleted. Safe to re-run.
+   - `supabase-weekly-tracker.sql` — adds `completed_at` and widens the
+     commitments policy to cover tasks that belong to no meeting, which is what
+     the "My Week" panel adds mid-week. Until this runs, that panel can show
+     commitments from meetings but cannot save a standalone task. Safe to re-run.
 3. Go to **Authentication > Providers** and make sure **Email** is enabled
 4. Go to **Settings > API** and copy:
    - **Project URL** (e.g. `https://abcdef.supabase.co`)
@@ -70,6 +74,11 @@ https://your-app.vercel.app/**
 ## How It Works
 
 **Dashboard (/)** — Sign in, create new meetings, search past discussions, see meeting history.
+
+**My Week (on the dashboard)** — The day-to-day tracker. Every commitment assigned
+to you or by you, across all meetings, grouped Overdue / Due today / Due this week /
+Later / No due date. Add a task that came up mid-week and it lives here with no
+meeting attached. Ticking one off records when, so "Done this week" is a real list.
 
 **Meeting page (/meeting/[id])** — The 5-section EOS agenda:
 1. **Segue** — Both users prep personal + professional wins independently

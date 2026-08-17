@@ -48,6 +48,21 @@ export async function tableExists(table: string) {
 export const commitmentsTableExists = () => tableExists('weekly_commitments')
 export const participantsTableExists = () => tableExists('meeting_participants')
 
+/**
+ * True once supabase-weekly-tracker.sql has been applied. Probes the column it
+ * adds — the table itself predates that migration, so tableExists can't tell.
+ */
+export async function trackerReady() {
+  loadDotenvIfNeeded()
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  if (!url || !anon) return false
+  const res = await fetch(`${url}/rest/v1/weekly_commitments?select=completed_at&limit=1`, {
+    headers: { apikey: anon, Authorization: `Bearer ${anon}` },
+  })
+  return res.ok
+}
+
 /** Creates a pre-confirmed user, so tests never wait on confirmation email. */
 export async function createUser(email: string, password: string, fullName = '') {
   loadDotenvIfNeeded()

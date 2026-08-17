@@ -1,6 +1,7 @@
 'use client'
 
 import { useAuth, useMeetings, createMeeting, deleteMeeting, describeMeetingError } from '@/lib/hooks'
+import MyWeek from '@/components/MyWeek'
 import { getResolvedSupabaseUrl } from '@/lib/supabase'
 import { useState } from 'react'
 import Link from 'next/link'
@@ -138,6 +139,9 @@ export default function Home() {
       </header>
 
       <main className="max-w-3xl mx-auto px-4 py-8">
+        {/* Day-to-day tracker: commitments from every meeting, plus mid-week tasks */}
+        <MyWeek userId={user.id} userName={user.full_name} />
+
         {/* New Meeting */}
         <div className="bg-white rounded-xl border border-light-gray p-6 mb-8">
           <h2 className="text-lg font-bold text-deep-purple mb-1">New Meeting</h2>

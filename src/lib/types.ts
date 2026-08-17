@@ -77,7 +77,8 @@ export interface Todo {
 
 export interface Commitment {
   id: string
-  meeting_id: string
+  /** Null for a task added mid-week rather than raised in a 1-on-1. */
+  meeting_id: string | null
   creator_id: string
   assignee_id: string
   title: string
@@ -87,7 +88,31 @@ export interface Commitment {
   notify_email: boolean
   notify_slack: boolean
   notified: boolean
+  completed_at: string | null
   created_at: string
+}
+
+/** A commitment with the date of the meeting it came from, for the tracker. */
+export type TrackedCommitment = Commitment & {
+  meeting: { meeting_date: string } | null
+}
+
+export type DueBucket = 'overdue' | 'today' | 'this_week' | 'later' | 'no_date'
+
+export const BUCKET_LABEL: Record<DueBucket, string> = {
+  overdue: 'Overdue',
+  today: 'Due today',
+  this_week: 'Due this week',
+  later: 'Later',
+  no_date: 'No due date',
+}
+
+export const BUCKET_ORDER: DueBucket[] = ['overdue', 'today', 'this_week', 'later', 'no_date']
+
+export interface Teammate {
+  id: string
+  full_name: string
+  email: string
 }
 
 export interface ExtractedItem {

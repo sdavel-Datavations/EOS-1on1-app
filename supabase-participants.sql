@@ -173,7 +173,13 @@ begin
     execute 'drop policy if exists "Commitment participants can insert" on public.weekly_commitments';
     execute 'drop policy if exists "Commitment participants can update" on public.weekly_commitments';
     execute 'drop policy if exists "Access via meeting" on public.weekly_commitments';
-    execute 'create policy "Access via meeting" on public.weekly_commitments for all
-      using (public.can_access_meeting(meeting_id))';
+    execute 'drop policy if exists "Access via meeting or ownership" on public.weekly_commitments';
+    -- Same expression supabase-weekly-tracker.sql installs, so re-running either
+    -- file converges instead of leaving a stale policy that hides standalone tasks.
+    execute 'create policy "Access via meeting or ownership" on public.weekly_commitments for all
+      using (
+        (meeting_id is not null and public.can_access_meeting(meeting_id))
+        or (meeting_id is null and (assignee_id = auth.uid() or creator_id = auth.uid()))
+      )';
   end if;
 end $$;
