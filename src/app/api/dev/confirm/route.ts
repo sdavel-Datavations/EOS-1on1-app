@@ -19,12 +19,15 @@ export async function POST(req: Request) {
     let userId: string | null = null
     for (let attempt = 0; attempt < 8; attempt++) {
       try {
-        // use admin listUsers (may be paginated) and search for email
+        // use admin listUsers (may return `users` or `data`) and search for email
         // eslint-disable-next-line @typescript-eslint/ban-ts-comment
         // @ts-ignore
         const listRes = await sb.auth.admin.listUsers()
-        const users = listRes?.data || []
-        const found = users.find((u: any) => u.email === email)
+        // support both shapes: { users: [...] } or { data: [...] }
+        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+        // @ts-ignore
+        const users = listRes?.users || listRes?.data || []
+        const found = (users || []).find((u: any) => u.email === email)
         if (found?.id) {
           userId = found.id
           break
