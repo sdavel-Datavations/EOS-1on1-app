@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase'
+import { blockedInProduction } from '@/lib/dev-only'
 
 export async function GET(_req: Request, context: any) {
+  const blocked = blockedInProduction()
+  if (blocked) return blocked
+
   const params = await context.params
   const { id } = params
   try {

@@ -216,3 +216,49 @@ test('the tracker holds mid-week tasks and commitments from meetings alike', asy
   await doneToggle.click()
   await expect(page.getByText('Done', { exact: true })).toBeVisible()
 })
+
+test('slack webhooks reject unsigned requests', async ({ request }) => {
+  // These endpoints act with the service role and have no session to rely on, so
+  // the HMAC signature is the only thing standing between a stranger and closing
+  // someone's tasks. Both must fail closed.
+  for (const path of ['/api/slack/events', '/api/slack/interactive']) {
+    const res = await request.post(`${baseUrl()}${path}`, {
+      data: { type: 'event_callback', event: { type: 'message', text: 'done' } },
+    })
+    expect(res.status(), `${path} accepted an unsigned request`).toBe(401)
+  }
+})
+
+test('slack events rejects a forged signature', async ({ request }) => {
+  const res = await request.post(`${baseUrl()}/api/slack/events`, {
+    headers: {
+      'x-slack-request-timestamp': String(Math.floor(Date.now() / 1000)),
+      'x-slack-signature': 'v0=' + 'f'.repeat(64),
+      'content-type': 'application/json',
+    },
+    data: { type: 'url_verification', challenge: 'let-me-in' },
+  })
+  expect(res.status()).toBe(401)
+  // And it must not echo the challenge back, which would confirm the endpoint
+  // answers unverified callers.
+  expect(await res.text()).not.toContain('let-me-in')
+})
+
+test('the notify endpoint will not fire for an anonymous caller', async ({ request }) => {
+  // GET is what Vercel Cron uses, so it takes the secret and nothing else —
+  // opening the URL in a browser must not send a round of notifications.
+  const get = await request.get(`${baseUrl()}/api/notify`)
+  expect(get.status()).toBe(401)
+  expect((await get.json()).error).toContain('cron secret')
+
+  const post = await request.post(`${baseUrl()}/api/notify`, { data: {} })
+  expect(post.status()).toBe(401)
+})
+
+test('an emailed done link refuses a token it did not sign', async ({ request }) => {
+  const res = await request.get(`${baseUrl()}/api/tasks/done?token=forged.signature`)
+  const body = await res.text()
+  expect(body).toContain('no longer valid')
+  // A GET must never complete a task: mail scanners fetch links unprompted.
+  expect(body).not.toContain('is closed')
+})

@@ -22,6 +22,9 @@
      commitments policy to cover tasks that belong to no meeting, which is what
      the "My Week" panel adds mid-week. Until this runs, that panel can show
      commitments from meetings but cannot save a standalone task. Safe to re-run.
+   - `supabase-notifications.sql` — where each task's Slack message lives (so a
+     threaded "done" reply can be matched back to it), the cached Slack user id,
+     and `notification_log`. Until this runs, `/api/notify` fails. Safe to re-run.
 3. Go to **Authentication > Providers** and make sure **Email** is enabled
 4. Go to **Settings > API** and copy:
    - **Project URL** (e.g. `https://abcdef.supabase.co`)
@@ -64,7 +67,71 @@ Or connect the GitHub repo in the Vercel dashboard. Set the same two environment
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 
-## 4. Supabase Auth — Redirect URLs
+## 4. Slack + Email Notifications
+
+Optional. Skip and the app works, minus the reminders.
+
+### Slack app
+
+1. api.slack.com/apps > **Create New App** > **From scratch**
+2. **OAuth & Permissions** > Bot Token Scopes, add exactly these four:
+   `chat:write`, `im:write`, `users:read`, `users:read.email`
+3. **Install to Workspace**, then copy the **Bot User OAuth Token** (`xoxb-…`)
+   into `SLACK_BOT_TOKEN`
+4. **Basic Information** > App Credentials > copy the **Signing Secret** into
+   `SLACK_SIGNING_SECRET`
+5. **Event Subscriptions** > on. Request URL:
+   `https://YOUR-DOMAIN/api/slack/events`
+   Slack sends a one-time `url_verification` challenge; the route answers it, but
+   only after checking the signature — so the signing secret must be set first or
+   verification fails. Then under **Subscribe to bot events** add `message.im`.
+6. **Interactivity & Shortcuts** > on. Request URL:
+   `https://YOUR-DOMAIN/api/slack/interactive`
+
+Every inbound Slack request is HMAC-verified against the signing secret, with a
+five-minute replay window. These endpoints act with the service role and have no
+session behind them, so that signature is the whole of their access control — if
+the secret is missing they reject everything, which is the correct direction to
+fail.
+
+### Email (Resend)
+
+1. resend.com > verify your sending domain
+2. **API Keys** > create one > `RESEND_API_KEY`
+3. `NOTIFY_FROM_EMAIL` — an address on the verified domain
+4. `ACTION_TOKEN_SECRET` — signs the "Mark done" links, which carry their own
+   authority because an inbox has no session:
+   ```bash
+   node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+   ```
+   Rotating it invalidates every link already sent.
+
+The emailed link opens a confirmation page and takes a second click. That is
+deliberate: mail clients and security scanners fetch links without anyone
+clicking them, so a link that completed a task on `GET` would close tasks by
+itself.
+
+### Scheduling
+
+`vercel.json` runs `/api/notify` at 13:00 UTC on weekdays. Set `CRON_SECRET` in
+Vercel and it sends that automatically as `Authorization: Bearer …`; the `GET`
+handler accepts nothing else, so opening the URL in a browser can't fire a round
+of notifications. `POST` additionally accepts a signed-in user, for a manual
+send.
+
+One message is sent per task rather than a digest, because a threaded "done"
+reply has to be unambiguous about which task it closes.
+
+### Closing a task from Slack
+
+Reply `done` in the task's thread, or press **Mark done**. The parser is
+deliberately strict — questions, negations ("not done"), hedges ("almost done"),
+and future tense ("I'll get it done") are all ignored, and anything over six
+words is treated as discussion. The button is the unambiguous path. Every
+completion records who closed it and how, in `weekly_commitments.completed_via`
+and `notification_log`.
+
+## 5. Supabase Auth — Redirect URLs
 
 In Supabase Dashboard > Authentication > URL Configuration, add your Vercel URL to **Redirect URLs**:
 ```
