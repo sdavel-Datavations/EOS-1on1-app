@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { createClient } from './supabase'
-import type { Meeting, SegueNote, ScorecardItem, Headline, Issue, Todo, SectionTimer, Profile } from './types'
+import type { Meeting, SegueNote, ScorecardItem, Headline, Issue, Todo, SectionTimer, Profile, Commitment } from './types'
 
 function getSupabase() {
   return createClient()
@@ -40,13 +40,14 @@ export function useAuth() {
   }
 
   const signUp = async (email: string, password: string, fullName: string) => {
-    const hasServiceRole = !!(process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE)
-    if (process.env.NODE_ENV !== 'production' || hasServiceRole) {
-      // Create user via dev admin endpoint to avoid sending confirmation emails
+    // In dev only, create the user through the admin endpoint so E2E runs don't
+    // hit Supabase's confirmation-email rate limits. Production uses the normal
+    // signUp flow below, with real email confirmation.
+    if (process.env.NODE_ENV !== 'production') {
       try {
         await fetch('/api/dev/create-user', { method: 'POST', body: JSON.stringify({ email, password, fullName }), headers: { 'Content-Type': 'application/json' } })
-      } catch (err) {
-        // ignore
+      } catch {
+        // ignore — fall through to the client signUp below
       }
       // Attempt to sign in directly
       for (let attempt = 0; attempt < 5; attempt++) {
@@ -89,7 +90,11 @@ export function useMeetings(userId: string | undefined) {
   const [loading, setLoading] = useState(true)
 
   const fetchMeetings = useCallback(async () => {
-    if (!userId) return
+    if (!userId) {
+      setMeetings([])
+      setLoading(false)
+      return
+    }
     const sb = getSupabase()
     const { data } = await sb
       .from('meetings')
@@ -234,18 +239,31 @@ export async function updateSegueNote(id: string, fields: Partial<SegueNote>) {
   return getSupabase().from('segue_notes').update(fields).eq('id', id)
 }
 
-export async function upsertSegueNote(item: Partial<SegueNote> & { meeting_id?: string; user_id?: string }) {
+export async function upsertSegueNote(item: Partial<SegueNote> & { meeting_id: string; user_id: string }) {
   const sb = getSupabase()
-  if (item.id) {
-    return sb.from('segue_notes').update(item).eq('id', item.id)
+  const { id, meeting_id, user_id, ...fields } = item
+  if (id) {
+    return sb.from('segue_notes').update(fields).eq('id', id)
   }
   // create new
-  const insert = { meeting_id: item.meeting_id, user_id: item.user_id, personal_win: item.personal_win || '', professional_win: item.professional_win || '' }
+  const insert = { meeting_id, user_id, personal_win: item.personal_win || '', professional_win: item.professional_win || '' }
   return sb.from('segue_notes').insert(insert).select().single()
 }
 
 export async function updateHeadline(id: string, content: string) {
   return getSupabase().from('headlines').update({ content }).eq('id', id)
+}
+
+export async function upsertHeadline(item: { id?: string; meeting_id: string; user_id: string; content: string }) {
+  const sb = getSupabase()
+  if (item.id) {
+    return sb.from('headlines').update({ content: item.content }).eq('id', item.id)
+  }
+  return sb
+    .from('headlines')
+    .insert({ meeting_id: item.meeting_id, user_id: item.user_id, content: item.content })
+    .select()
+    .single()
 }
 
 export async function upsertScorecardItem(item: Partial<ScorecardItem> & { meeting_id: string }) {
@@ -290,6 +308,66 @@ export async function updateMeeting(id: string, fields: Partial<Meeting>) {
 
 export async function updateSectionTimer(id: string, fields: Partial<SectionTimer>) {
   return getSupabase().from('section_timers').update(fields).eq('id', id)
+}
+
+// ── Weekly Commitments ──
+export function useCommitments(meetingId: string) {
+  const [commitments, setCommitments] = useState<Commitment[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const fetchCommitments = useCallback(async () => {
+    const { data, error } = await getSupabase()
+      .from('weekly_commitments')
+      .select('*')
+      .eq('meeting_id', meetingId)
+      .order('created_at')
+    setError(error ? describeCommitmentError(error) : null)
+    setCommitments(data || [])
+    setLoading(false)
+  }, [meetingId])
+
+  useEffect(() => { fetchCommitments() }, [fetchCommitments])
+
+  return { commitments, loading, error, refetch: fetchCommitments }
+}
+
+/** PGRST205 means the table isn't in the schema cache — usually an unapplied migration. */
+export function describeCommitmentError(error: { code?: string; message: string }) {
+  if (error.code === 'PGRST205') {
+    return 'Commitments table not found — run supabase-commitments.sql in the Supabase SQL editor.'
+  }
+  return error.message
+}
+
+export async function createCommitment(item: {
+  meeting_id: string
+  creator_id: string
+  assignee_id: string
+  title: string
+  description?: string
+  due_date?: string | null
+  notify_email?: boolean
+  notify_slack?: boolean
+}) {
+  return getSupabase()
+    .from('weekly_commitments')
+    .insert({
+      meeting_id: item.meeting_id,
+      creator_id: item.creator_id,
+      assignee_id: item.assignee_id,
+      title: item.title,
+      description: item.description || '',
+      due_date: item.due_date || null,
+      notify_email: item.notify_email ?? true,
+      notify_slack: item.notify_slack ?? false,
+    })
+    .select()
+    .single()
+}
+
+export async function updateCommitment(id: string, fields: Partial<Commitment>) {
+  return getSupabase().from('weekly_commitments').update(fields).eq('id', id)
 }
 
 // ── Search past issues/discussions ──

@@ -2,9 +2,11 @@
 
 import { use, useState, useEffect, useRef, useCallback } from 'react'
 import Link from 'next/link'
-import { useAuth, useMeeting, updateSegueNote, upsertSegueNote, updateHeadline, upsertScorecardItem, deleteScorecardItem, upsertIssue, deleteIssue, upsertTodo, deleteTodo, updateMeeting, updateSectionTimer } from '@/lib/hooks'
+import { useAuth, useMeeting, updateSegueNote, upsertSegueNote, updateHeadline, upsertHeadline, upsertScorecardItem, deleteScorecardItem, upsertIssue, deleteIssue, upsertTodo, deleteTodo, updateMeeting, updateSectionTimer, useCommitments, createCommitment, updateCommitment, describeCommitmentError } from '@/lib/hooks'
 import { SECTIONS } from '@/lib/types'
 import type { ScorecardItem, Issue, Todo, SegueNote, Headline, SectionTimer } from '@/lib/types'
+
+type Participant = { id: string; full_name: string; role: string; email?: string }
 
 function initials(name?: string) {
   if (!name) return ''
@@ -23,6 +25,25 @@ function colorFor(key?: string) {
   return `hsl(${hue} 60% 45%)`
 }
 
+function ParticipantLabel({ participant }: { participant: Participant }) {
+  return (
+    <div className="flex items-center justify-between">
+      <div className="flex items-center gap-2">
+        <div
+          className="w-7 h-7 rounded-full flex items-center justify-center text-white font-semibold text-xs flex-shrink-0"
+          style={{ backgroundColor: colorFor(participant.id || participant.full_name) }}
+        >
+          {initials(participant.full_name)}
+        </div>
+        <label className="text-[11px] font-bold uppercase tracking-wide text-medium-purple">
+          {participant.full_name || participant.email}
+        </label>
+      </div>
+      <span className="text-xs text-gray">{participant.role}</span>
+    </div>
+  )
+}
+
 export default function MeetingPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
   const { user } = useAuth()
@@ -37,6 +58,35 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
   const [expandedSection, setExpandedSection] = useState<number>(0)
   const [rating, setRating] = useState<number>(0)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // Participant state — must stay above the loading early-return so hook order is stable
+  const [extraProfiles, setExtraProfiles] = useState<{ id: string; full_name: string; email: string }[]>([])
+  const [addingEmail, setAddingEmail] = useState('')
+  const [addingState, setAddingState] = useState<'idle' | 'loading' | 'error' | 'done'>('idle')
+
+  // Derive extra participants from any segue/headline rows that aren't manager or report
+  useEffect(() => {
+    if (!meeting) return
+    const ids = new Set<string>()
+    segueNotes.forEach(n => ids.add(n.user_id))
+    headlines.forEach(h => ids.add(h.user_id))
+    const extra = Array.from(ids).filter(uid => uid && uid !== meeting.manager_id && uid !== meeting.report_id)
+    if (extra.length === 0) {
+      setExtraProfiles([])
+      return
+    }
+    ;(async () => {
+      try {
+        const { createClient } = await import('@/lib/supabase')
+        const supabase = createClient()
+        const { data } = await supabase.from('profiles').select('id, full_name, email').in('id', extra)
+        setExtraProfiles(data || [])
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('Failed to load extra profiles', err)
+      }
+    })()
+  }, [meeting, segueNotes, headlines])
 
   // Load saved timer state
   useEffect(() => {
@@ -152,41 +202,6 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
     )
   }
 
-  const managerSegue = segueNotes.find((n: SegueNote) => n.user_id === meeting.manager_id)
-  const reportSegue = segueNotes.find((n: SegueNote) => n.user_id === meeting.report_id)
-  const managerHeadline = headlines.find((h: Headline) => h.user_id === meeting.manager_id)
-  const reportHeadline = headlines.find((h: Headline) => h.user_id === meeting.report_id)
-  const amManager = user.id === meeting.manager_id
-  const amReport = user.id === meeting.report_id
-  const [extraProfiles, setExtraProfiles] = useState<{ id: string; full_name: string; email: string }[]>([])
-  
-  // derive participants from meeting + any segue/headline user_ids
-  useEffect(() => {
-    const ids = new Set<string>()
-    if (meeting.manager_id) ids.add(meeting.manager_id)
-    if (meeting.report_id) ids.add(meeting.report_id)
-    segueNotes.forEach(n => ids.add(n.user_id))
-    headlines.forEach(h => ids.add(h.user_id))
-    // remove manager/report which are already present in meeting
-    const extra = Array.from(ids).filter(id => id !== meeting.manager_id && id !== meeting.report_id)
-    if (extra.length === 0) {
-      setExtraProfiles([])
-      return
-    }
-    ;(async () => {
-      try {
-        const { createClient } = await import('@/lib/supabase')
-        const supabase = createClient()
-        const { data } = await supabase.from('profiles').select('id, full_name, email').in('id', extra)
-        setExtraProfiles(data || [])
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.error('Failed to load extra profiles', err)
-      }
-    })()
-  }, [meeting, segueNotes, headlines])
-  const [addingEmail, setAddingEmail] = useState('')
-  const [addingState, setAddingState] = useState<'idle' | 'loading' | 'error' | 'done'>('idle')
   const measurables = scorecardItems.filter((s: ScorecardItem) => s.item_type === 'measurable')
   const rocks = scorecardItems.filter((s: ScorecardItem) => s.item_type === 'rock')
   const carriedTodos = todos.filter((t: Todo) => !t.is_new)
@@ -255,14 +270,22 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
           ))}
 
           <div className="ml-auto flex items-center gap-2">
-            <input value={addingEmail} onChange={e => setAddingEmail(e.target.value)} placeholder="Add participant email" className="border border-light-gray rounded px-3 py-1 text-sm" />
-            <button onClick={async () => {
+            {addingState === 'error' && <span className="text-xs text-coral-red">No account with that email</span>}
+            <input
+              value={addingEmail}
+              onChange={e => { setAddingEmail(e.target.value); setAddingState('idle') }}
+              placeholder="Add participant email"
+              className="border border-light-gray rounded px-3 py-1 text-sm focus:border-steel-blue focus:outline-none"
+            />
+            <button
+              disabled={addingState === 'loading' || !addingEmail}
+              onClick={async () => {
               if (!addingEmail) return
               setAddingState('loading')
               try {
                 const { createClient } = await import('@/lib/supabase')
                 const supabase = createClient()
-                const { data: profile, error } = await supabase.from('profiles').select('id, full_name, email').eq('email', addingEmail).maybeSingle()
+                const { data: profile, error } = await supabase.from('profiles').select('id, full_name, email').eq('email', addingEmail.trim()).maybeSingle()
                 if (error) throw error
                 if (!profile) {
                   setAddingState('error')
@@ -273,15 +296,16 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
                 await supabase.from('headlines').insert({ meeting_id: meeting.id, user_id: profile.id, content: '' })
                 setAddingEmail('')
                 setAddingState('done')
-                // refresh local data
+                // refresh local data — the extraProfiles effect picks up the new user_id
                 await refetch()
-                // fetch extra profiles again below by effect
               } catch (err) {
                 // eslint-disable-next-line no-console
                 console.error('Add participant failed', err)
                 setAddingState('error')
               }
-            }} className={`py-1 px-3 rounded bg-steel-blue text-white text-sm ${addingState==='loading' ? 'opacity-70' : ''}`}>Add</button>
+            }} className="py-1 px-3 rounded bg-steel-blue text-white text-sm hover:bg-[#25698f] transition disabled:opacity-50">
+              {addingState === 'loading' ? 'Adding...' : 'Add'}
+            </button>
           </div>
         </div>
       </div>
@@ -318,7 +342,7 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
         <div className="bg-white rounded-xl border border-light-gray p-6">
           <h2 className="text-lg font-bold text-deep-purple mb-2">Weekly Commitments</h2>
           <p className="text-sm text-gray mb-4">Float tasks during the week and notify assignees via email or Slack.</p>
-          <WeeklyCommitments meetingId={id} participants={[meeting.manager, meeting.report, ...extraProfiles]} />
+          <WeeklyCommitments meetingId={id} participants={participants} currentUserId={user.id} />
         </div>
         {SECTIONS.map((section, i) => (
           <div key={section.key} className={`bg-white rounded-xl border transition overflow-hidden ${
@@ -378,33 +402,33 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                       {participants.map(p => {
                         const note = segueNotes.find((n: SegueNote) => n.user_id === p.id)
+                        // Editable by any participant — this is a single shared agenda
+                        const saveWin = async (field: 'personal_win' | 'professional_win', val: string) => {
+                          if ((note?.[field] || '') === val) return
+                          if (note?.id) {
+                            await updateSegueNote(note.id, { [field]: val })
+                          } else {
+                            await upsertSegueNote({ meeting_id: id, user_id: p.id, [field]: val })
+                            await refetch() // pick up the new row id so the next edit updates instead of inserting
+                          }
+                        }
                         return (
-                          <div key={p.id}>
-                            <div className="flex items-center justify-between mb-2">
-                              <div className="flex items-center gap-2">
-                                <div className="w-7 h-7 rounded-full flex items-center justify-center text-white font-semibold text-xs" style={{ backgroundColor: colorFor(p.id || p.full_name) }}>{initials(p.full_name)}</div>
-                                <label className="text-[11px] font-bold uppercase tracking-wide text-medium-purple">{p.full_name || p.email}</label>
-                              </div>
-                              <span className="text-xs text-gray">{p.role}</span>
-                            </div>
-
-                            {/* Editable by any participant to make this a single shared agenda */}
-                            <>
-                              <textarea
-                                defaultValue={note?.professional_win || ''}
-                                placeholder="Professional win..."
-                                onBlur={async e => {
-                                  const val = e.target.value
-                                  if (note?.id) {
-                                    await updateSegueNote(note.id, { professional_win: val })
-                                  } else {
-                                    await upsertSegueNote({ meeting_id: id, user_id: p.id, professional_win: val })
-                                  }
-                                }}
-                                className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none"
-                                rows={2}
-                              />
-                            </>
+                          <div key={p.id} className="space-y-2">
+                            <ParticipantLabel participant={p} />
+                            <textarea
+                              defaultValue={note?.personal_win || ''}
+                              placeholder="Personal win..."
+                              onBlur={e => saveWin('personal_win', e.target.value)}
+                              className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none"
+                              rows={2}
+                            />
+                            <textarea
+                              defaultValue={note?.professional_win || ''}
+                              placeholder="Professional win..."
+                              onBlur={e => saveWin('professional_win', e.target.value)}
+                              className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none"
+                              rows={2}
+                            />
                           </div>
                         )
                       })}
@@ -435,64 +459,31 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
                     <p className="text-sm text-gray font-condensed leading-relaxed">
                       Employee, customer, or operational news worth flagging — good or bad.
                     </p>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {/* Manager headlines */}
-                      <div>
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="flex items-center gap-2">
-                            <div className="w-7 h-7 rounded-full flex items-center justify-center text-white font-semibold text-xs" style={{ backgroundColor: colorFor(meeting.manager?.id || meeting.manager?.full_name) }}>{initials(meeting.manager?.full_name)}</div>
-                            <label className="text-[11px] font-bold uppercase tracking-wide text-medium-purple">{meeting.manager?.full_name || 'Manager'}</label>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {participants.map(p => {
+                        const headline = headlines.find((h: Headline) => h.user_id === p.id)
+                        const saveHeadline = async (val: string) => {
+                          if ((headline?.content || '') === val) return
+                          if (headline?.id) {
+                            await updateHeadline(headline.id, val)
+                          } else {
+                            await upsertHeadline({ meeting_id: id, user_id: p.id, content: val })
+                            await refetch() // pick up the new row id so the next edit updates instead of inserting
+                          }
+                        }
+                        return (
+                          <div key={p.id} className="space-y-2">
+                            <ParticipantLabel participant={p} />
+                            <textarea
+                              defaultValue={headline?.content || ''}
+                              placeholder="News and updates..."
+                              onBlur={e => saveHeadline(e.target.value)}
+                              className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none"
+                              rows={3}
+                            />
                           </div>
-                          <span className="text-xs text-gray">Manager</span>
-                        </div>
-                        {managerHeadline && amManager && (
-                          <textarea
-                            defaultValue={managerHeadline.content || ''}
-                            placeholder="News and updates..."
-                            onBlur={e => updateHeadline(managerHeadline.id, e.target.value)}
-                            className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none"
-                            rows={3}
-                          />
-                        )}
-                        {managerHeadline && !amManager && (
-                          <div className="bg-bg rounded-lg p-3"><p className="text-sm whitespace-pre-wrap">{managerHeadline.content || <span className="text-light-gray italic">Not yet filled in</span>}</p></div>
-                        )}
-                        {!managerHeadline && amManager && (
-                          <textarea placeholder="News and updates..." className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none" rows={3} />
-                        )}
-                        {!managerHeadline && !amManager && (
-                          <p className="text-sm text-light-gray italic">Not yet filled in</p>
-                        )}
-                      </div>
-
-                      {/* Report headlines */}
-                      <div>
-                        <div className="flex items-center justify-between mb-2">
-                          <div className="flex items-center gap-2">
-                            <div className="w-7 h-7 rounded-full flex items-center justify-center text-white font-semibold text-xs" style={{ backgroundColor: colorFor(meeting.report?.id || meeting.report?.full_name) }}>{initials(meeting.report?.full_name)}</div>
-                            <label className="text-[11px] font-bold uppercase tracking-wide text-medium-purple">{meeting.report?.full_name || 'Report'}</label>
-                          </div>
-                          <span className="text-xs text-gray">Report</span>
-                        </div>
-                        {reportHeadline && amReport && (
-                          <textarea
-                            defaultValue={reportHeadline.content || ''}
-                            placeholder="News and updates..."
-                            onBlur={e => updateHeadline(reportHeadline.id, e.target.value)}
-                            className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none"
-                            rows={3}
-                          />
-                        )}
-                        {reportHeadline && !amReport && (
-                          <div className="bg-bg rounded-lg p-3"><p className="text-sm whitespace-pre-wrap">{reportHeadline.content || <span className="text-light-gray italic">Not yet filled in</span>}</p></div>
-                        )}
-                        {!reportHeadline && amReport && (
-                          <textarea placeholder="News and updates..." className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-none focus:border-steel-blue focus:outline-none" rows={3} />
-                        )}
-                        {!reportHeadline && !amReport && (
-                          <p className="text-sm text-light-gray italic">Not yet filled in</p>
-                        )}
-                      </div>
+                        )
+                      })}
                     </div>
                   </div>
                 )}
@@ -690,57 +681,126 @@ function TodoList({ todos, meetingId, isNew, onUpdate }: {
   )
 }
 
-function WeeklyCommitments({ meetingId, participants }: { meetingId: string, participants: any[] }) {
-  const [items, setItems] = useState<any[]>([])
+function WeeklyCommitments({ meetingId, participants, currentUserId }: {
+  meetingId: string, participants: Participant[], currentUserId: string
+}) {
+  const { commitments, loading, error: loadError, refetch } = useCommitments(meetingId)
   const [title, setTitle] = useState('')
-  const [assignee, setAssignee] = useState(participants[0]?.id || '')
+  const [assignee, setAssignee] = useState('')
   const [due, setDue] = useState('')
   const [notifyEmail, setNotifyEmail] = useState(true)
   const [notifySlack, setNotifySlack] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
 
-  const fetchItems = async () => {
-    const res = await fetch(`/api/commitments?meeting_id=${meetingId}`)
-    const j = await res.json()
-    setItems(j.data || [])
+  // Default the assignee to the current user once the participant list resolves
+  useEffect(() => {
+    if (assignee || participants.length === 0) return
+    setAssignee(participants.some(p => p.id === currentUserId) ? currentUserId : participants[0].id)
+  }, [participants, assignee, currentUserId])
+
+  const nameFor = (userId: string) => {
+    const p = participants.find(x => x.id === userId)
+    return p?.full_name || p?.email || 'Unassigned'
   }
-
-  useEffect(() => { fetchItems() }, [])
 
   const create = async () => {
-    if (!title || !assignee) return
-    const body = { meeting_id: meetingId, creator_id: participants[0]?.id || '', assignee_id: assignee, title, description: '', due_date: due || null, notify_email: notifyEmail, notify_slack: notifySlack }
-    await fetch('/api/commitments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-    setTitle('')
-    setDue('')
-    fetchItems()
+    if (!title.trim() || !assignee || saving) return
+    setSaving(true)
+    setSaveError(null)
+    const { error } = await createCommitment({
+      meeting_id: meetingId,
+      creator_id: currentUserId,
+      assignee_id: assignee,
+      title: title.trim(),
+      due_date: due || null,
+      notify_email: notifyEmail,
+      notify_slack: notifySlack,
+    })
+    if (error) {
+      setSaveError(describeCommitmentError(error))
+    } else {
+      setTitle('')
+      setDue('')
+      await refetch()
+    }
+    setSaving(false)
   }
+
+  const toggleDone = async (id: string, status: 'open' | 'done') => {
+    const { error } = await updateCommitment(id, { status: status === 'done' ? 'open' : 'done' })
+    if (error) setSaveError(describeCommitmentError(error))
+    await refetch()
+  }
+
+  const problem = saveError || loadError
 
   return (
     <div>
-      <div className="space-y-3 mb-4">
-        {items.map(it => (
-          <div key={it.id} className="flex items-center justify-between p-3 border rounded">
-            <div>
-              <div className="font-semibold">{it.title}</div>
-              <div className="text-xs text-gray">Due: {it.due_date || '—'}</div>
+      {problem && (
+        <div className="bg-red-light text-coral-red text-sm p-3 rounded-lg mb-4">{problem}</div>
+      )}
+      <div className="space-y-2 mb-4">
+        {loading ? (
+          <p className="text-sm text-gray">Loading commitments...</p>
+        ) : commitments.length === 0 ? (
+          <p className="text-sm text-light-gray italic">No commitments yet.</p>
+        ) : commitments.map(c => (
+          <div key={c.id} className="flex items-center gap-3 p-3 border border-light-gray rounded-lg">
+            <button
+              onClick={() => toggleDone(c.id, c.status)}
+              className={`w-6 h-6 rounded flex items-center justify-center text-xs border-2 flex-shrink-0 transition ${
+                c.status === 'done' ? 'bg-green border-green text-white' : 'border-light-gray text-transparent hover:border-green'
+              }`}
+              title={c.status === 'done' ? 'Mark as open' : 'Mark as done'}
+            >
+              ✓
+            </button>
+            <div className="flex-1 min-w-0">
+              <div className={`font-semibold text-sm ${c.status === 'done' ? 'line-through text-gray' : 'text-near-black'}`}>{c.title}</div>
+              <div className="text-xs text-gray">
+                {nameFor(c.assignee_id)} · Due {c.due_date || '—'}
+                {c.notify_email && <span> · email</span>}
+                {c.notify_slack && <span> · slack</span>}
+              </div>
             </div>
-            <div className="text-sm text-gray">{it.assignee_id}</div>
           </div>
         ))}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-        <input className="col-span-2 border px-3 py-2 rounded" placeholder="Commitment title" value={title} onChange={e => setTitle(e.target.value)} />
-        <input type="date" className="border px-3 py-2 rounded" value={due} onChange={e => setDue(e.target.value)} />
-        <select className="col-span-2 border px-3 py-2 rounded" value={assignee} onChange={e => setAssignee(e.target.value)}>
+        <input
+          className="md:col-span-2 border border-light-gray rounded-lg px-3 py-2 text-sm focus:border-steel-blue focus:outline-none"
+          placeholder="Commitment title"
+          value={title}
+          onChange={e => setTitle(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') create() }}
+        />
+        <input
+          type="date"
+          className="border border-light-gray rounded-lg px-3 py-2 text-sm focus:border-steel-blue focus:outline-none"
+          value={due}
+          onChange={e => setDue(e.target.value)}
+        />
+        <select
+          className="md:col-span-2 border border-light-gray rounded-lg px-3 py-2 text-sm focus:border-steel-blue focus:outline-none"
+          value={assignee}
+          onChange={e => setAssignee(e.target.value)}
+        >
           {participants.map(p => <option key={p.id} value={p.id}>{p.full_name || p.email}</option>)}
         </select>
-        <div className="flex items-center gap-2">
-          <label className="text-sm"><input type="checkbox" checked={notifyEmail} onChange={e => setNotifyEmail(e.target.checked)} /> Email</label>
-          <label className="text-sm"><input type="checkbox" checked={notifySlack} onChange={e => setNotifySlack(e.target.checked)} /> Slack</label>
+        <div className="flex items-center gap-3 text-sm text-gray">
+          <label className="flex items-center gap-1"><input type="checkbox" checked={notifyEmail} onChange={e => setNotifyEmail(e.target.checked)} /> Email</label>
+          <label className="flex items-center gap-1"><input type="checkbox" checked={notifySlack} onChange={e => setNotifySlack(e.target.checked)} /> Slack</label>
         </div>
-        <div className="col-span-3 flex justify-end">
-          <button onClick={create} className="bg-steel-blue text-white px-4 py-2 rounded">Add Commitment</button>
+        <div className="md:col-span-3 flex justify-end">
+          <button
+            onClick={create}
+            disabled={saving || !title.trim()}
+            className="bg-steel-blue text-white font-semibold px-4 py-2 rounded-lg text-sm hover:bg-[#25698f] transition disabled:opacity-50"
+          >
+            {saving ? 'Adding...' : 'Add Commitment'}
+          </button>
         </div>
       </div>
     </div>

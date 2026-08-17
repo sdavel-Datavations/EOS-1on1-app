@@ -64,6 +64,21 @@ export interface Todo {
   sort_order: number
 }
 
+export interface Commitment {
+  id: string
+  meeting_id: string
+  creator_id: string
+  assignee_id: string
+  title: string
+  description: string
+  due_date: string | null
+  status: 'open' | 'done'
+  notify_email: boolean
+  notify_slack: boolean
+  notified: boolean
+  created_at: string
+}
+
 export interface SectionTimer {
   id: string
   meeting_id: string
