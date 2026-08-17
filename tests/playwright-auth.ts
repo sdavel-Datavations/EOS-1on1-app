@@ -1,5 +1,4 @@
-import { Page } from '@playwright/test'
-import { createClient } from '@supabase/supabase-js'
+import { Page, expect } from '@playwright/test'
 import fs from 'fs'
 import path from 'path'
 
@@ -21,55 +20,57 @@ function loadDotenvIfNeeded() {
         if (!process.env[key]) process.env[key] = val
       }
     })
-  } catch (e) {
+  } catch {
     // ignore
   }
 }
 
+/**
+ * True once supabase-commitments.sql has been applied. PostgREST answers with
+ * PGRST205 while the table is absent from the schema cache.
+ */
+export async function commitmentsTableExists() {
+  loadDotenvIfNeeded()
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  if (!url || !anon) return false
+  const res = await fetch(`${url}/rest/v1/weekly_commitments?select=id&limit=1`, {
+    headers: { apikey: anon, Authorization: `Bearer ${anon}` },
+  })
+  if (res.ok) return true
+  const body = await res.text()
+  return !body.includes('PGRST205')
+}
+
+/**
+ * Creates a pre-confirmed user via the dev admin endpoint, then signs in through
+ * the app's own login form.
+ *
+ * We deliberately do NOT inject a session directly: @supabase/ssr's
+ * createBrowserClient persists sessions in document.cookie (chunked, base64-
+ * prefixed), so seeding localStorage has no effect and the app stays logged out.
+ * Driving the real form keeps this independent of supabase's storage format.
+ */
 export async function seedAndLogin(page: Page, email: string, password: string, fullName = '') {
   loadDotenvIfNeeded()
-  const baseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
-  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
 
-  // create user via dev admin endpoint (no confirmation emails)
-  try {
-    const resp = await fetch('http://localhost:3000/api/dev/create-user', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, fullName }),
-    })
-    try {
-      const j = await resp.json()
-      // eslint-disable-next-line no-console
-      console.log('dev create-user response', j)
-    } catch (e) {
-      // ignore
-    }
-  } catch (err) {
-    // ignore
+  const baseURL = process.env.DEPLOY_URL || 'http://localhost:3000'
+  const resp = await fetch(`${baseURL}/api/dev/create-user`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password, fullName }),
+  })
+  if (!resp.ok) {
+    throw new Error(`dev create-user failed (${resp.status}): ${await resp.text()}`)
   }
 
-  // sign in via anon key to get a session
-  const sb = createClient(baseUrl, anon)
-  const signInRes = await sb.auth.signInWithPassword({ email, password })
-  // eslint-disable-next-line no-console
-  console.log('signInRes', JSON.stringify(signInRes?.error ? { error: signInRes.error } : { ok: !!signInRes.data }))
-  const session = signInRes?.data?.session || null
-  // eslint-disable-next-line no-console
-  console.log('session', JSON.stringify(session))
+  await page.goto('/')
+  await page.getByPlaceholder('Email').fill(email)
+  await page.getByPlaceholder('Password').fill(password)
+  await page.getByRole('button', { name: 'Sign In' }).click()
 
-  // compute storage key used by supabase-js
-  const projRef = new URL(baseUrl).hostname.split('.')[0]
-  const storageKey = `sb-${projRef}-auth-token`
-
-  // write session to localStorage before navigation
-  await page.addInitScript(({ key, sess }) => {
-    try {
-      localStorage.setItem(key, JSON.stringify(sess))
-    } catch (e) {
-      // ignore
-    }
-  }, { key: storageKey, sess: session })
+  // The dashboard replaces the auth card once the session is established
+  await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible({ timeout: 15000 })
 }
 
 export default seedAndLogin
