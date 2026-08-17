@@ -2,6 +2,12 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
 export async function POST(req: Request) {
+  // Dev-only: this endpoint is unauthenticated and creates email-confirmed users
+  // with the service role key. Never expose it from a production deployment.
+  if (process.env.NODE_ENV === 'production' && process.env.ALLOW_DEV_AUTH_ROUTES !== 'true') {
+    return NextResponse.json({ error: 'not found' }, { status: 404 })
+  }
+
   const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL
   const SERVICE = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE
   if (!SUPABASE_URL || !SERVICE) return NextResponse.json({ error: 'server not configured' }, { status: 500 })

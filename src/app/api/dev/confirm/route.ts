@@ -2,7 +2,12 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
 export async function POST(req: Request) {
-  // Dev-only: require service role key
+  // Dev-only: this endpoint is unauthenticated and uses the service role key,
+  // so it must never be reachable from a production deployment.
+  if (process.env.NODE_ENV === 'production' && process.env.ALLOW_DEV_AUTH_ROUTES !== 'true') {
+    return NextResponse.json({ error: 'not found' }, { status: 404 })
+  }
+
   const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL
   const SERVICE = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE
   if (!SUPABASE_URL || !SERVICE) return NextResponse.json({ error: 'server not configured' }, { status: 500 })
@@ -14,22 +19,18 @@ export async function POST(req: Request) {
 
     const sb = createClient(SUPABASE_URL, SERVICE)
 
-    // find profile id by email
     // Try to find the auth user by email via the admin API, with a short retry loop
     let userId: string | null = null
     for (let attempt = 0; attempt < 8; attempt++) {
       try {
-        // use admin listUsers (may be paginated) and search for email
-        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-        // @ts-ignore
-        const listRes = await sb.auth.admin.listUsers()
-        const users = listRes?.data || []
-        const found = users.find((u: any) => u.email === email)
+        // listUsers is paginated; the newest signup lands on page 1 in dev
+        const { data } = await sb.auth.admin.listUsers()
+        const found = data.users.find(u => u.email === email)
         if (found?.id) {
           userId = found.id
           break
         }
-      } catch (e) {
+      } catch {
         // ignore and retry
       }
       // wait 300ms before retrying
