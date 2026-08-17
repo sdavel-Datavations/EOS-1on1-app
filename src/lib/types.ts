@@ -90,6 +90,28 @@ export interface Commitment {
   created_at: string
 }
 
+export interface ExtractedItem {
+  id: string
+  meeting_id: string
+  source: 'upload' | 'granola'
+  source_ref: string | null
+  extracted_by: string | null
+  target: 'todo' | 'commitment' | 'issue'
+  title: string
+  owner_id: string | null
+  due_date: string | null
+  evidence: string
+  confidence: 'high' | 'medium' | 'low'
+  duplicate_of_kind: 'todo' | 'commitment' | null
+  duplicate_of_id: string | null
+  status: 'pending' | 'accepted' | 'rejected'
+  reviewed_by: string | null
+  reviewed_at: string | null
+  accepted_kind: 'todo' | 'commitment' | 'issue' | null
+  accepted_id: string | null
+  created_at: string
+}
+
 export interface SectionTimer {
   id: string
   meeting_id: string

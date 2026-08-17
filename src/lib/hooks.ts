@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { createClient } from './supabase'
-import type { Meeting, SegueNote, ScorecardItem, Headline, Issue, Todo, SectionTimer, Profile, Commitment, MeetingParticipant, ParticipantRole } from './types'
+import type { Meeting, SegueNote, ScorecardItem, Headline, Issue, Todo, SectionTimer, Profile, Commitment, MeetingParticipant, ParticipantRole, ExtractedItem } from './types'
 
 function getSupabase() {
   return createClient()
@@ -417,6 +417,95 @@ export async function createCommitment(item: {
 
 export async function updateCommitment(id: string, fields: Partial<Commitment>) {
   return getSupabase().from('weekly_commitments').update(fields).eq('id', id)
+}
+
+// ── Extraction review queue ──
+export function useExtractedItems(meetingId: string) {
+  const [items, setItems] = useState<ExtractedItem[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const fetchItems = useCallback(async () => {
+    const { data, error } = await getSupabase()
+      .from('extracted_items')
+      .select('*')
+      .eq('meeting_id', meetingId)
+      .eq('status', 'pending')
+      .order('created_at')
+    setError(error ? describeExtractionError(error) : null)
+    setItems(data || [])
+    setLoading(false)
+  }, [meetingId])
+
+  useEffect(() => { fetchItems() }, [fetchItems])
+
+  return { items, loading, error, refetch: fetchItems }
+}
+
+/** PGRST205 means the table isn't in the schema cache — usually an unapplied migration. */
+export function describeExtractionError(error: { code?: string; message: string }) {
+  if (error.code === 'PGRST205') {
+    return 'Extracted items table not found — run supabase-transcripts.sql in the Supabase SQL editor.'
+  }
+  return error.message
+}
+
+/**
+ * Accepts a staged item onto the agenda: creates the real row, then records what
+ * it became so the decision is auditable and can't be double-applied.
+ */
+export async function acceptExtractedItem(item: ExtractedItem, reviewerId: string) {
+  const sb = getSupabase()
+  let createdId: string | null = null
+
+  if (item.target === 'commitment') {
+    const { data, error } = await createCommitment({
+      meeting_id: item.meeting_id,
+      creator_id: reviewerId,
+      assignee_id: item.owner_id || reviewerId,
+      title: item.title,
+      due_date: item.due_date,
+    })
+    if (error) return { error: error.message }
+    createdId = data?.id ?? null
+  } else if (item.target === 'issue') {
+    const { data, error } = await sb
+      .from('issues')
+      .insert({ meeting_id: item.meeting_id, description: item.title, priority: 'M' })
+      .select()
+      .single()
+    if (error) return { error: error.message }
+    createdId = data?.id ?? null
+  } else {
+    const { data, error } = await sb
+      .from('todos')
+      .insert({ meeting_id: item.meeting_id, text: item.title, done: false, is_new: true })
+      .select()
+      .single()
+    if (error) return { error: error.message }
+    createdId = data?.id ?? null
+  }
+
+  const { error } = await sb
+    .from('extracted_items')
+    .update({
+      status: 'accepted',
+      reviewed_by: reviewerId,
+      reviewed_at: new Date().toISOString(),
+      accepted_kind: item.target,
+      accepted_id: createdId,
+    })
+    .eq('id', item.id)
+
+  return { error: error?.message ?? null }
+}
+
+export async function rejectExtractedItem(id: string, reviewerId: string) {
+  const { error } = await getSupabase()
+    .from('extracted_items')
+    .update({ status: 'rejected', reviewed_by: reviewerId, reviewed_at: new Date().toISOString() })
+    .eq('id', id)
+  return { error: error?.message ?? null }
 }
 
 // ── Search past issues/discussions ──

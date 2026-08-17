@@ -2,9 +2,9 @@
 
 import { use, useState, useEffect, useRef, useCallback } from 'react'
 import Link from 'next/link'
-import { useAuth, useMeeting, updateSegueNote, upsertSegueNote, updateHeadline, upsertHeadline, upsertScorecardItem, deleteScorecardItem, upsertIssue, deleteIssue, upsertTodo, deleteTodo, updateMeeting, updateSectionTimer, useCommitments, createCommitment, updateCommitment, describeCommitmentError, addParticipantByEmail, removeParticipant } from '@/lib/hooks'
+import { useAuth, useMeeting, updateSegueNote, upsertSegueNote, updateHeadline, upsertHeadline, upsertScorecardItem, deleteScorecardItem, upsertIssue, deleteIssue, upsertTodo, deleteTodo, updateMeeting, updateSectionTimer, useCommitments, createCommitment, updateCommitment, describeCommitmentError, addParticipantByEmail, removeParticipant, useExtractedItems, acceptExtractedItem, rejectExtractedItem } from '@/lib/hooks'
 import { SECTIONS } from '@/lib/types'
-import type { ScorecardItem, Issue, Todo, SegueNote, Headline, SectionTimer, ParticipantRole } from '@/lib/types'
+import type { ScorecardItem, Issue, Todo, SegueNote, Headline, SectionTimer, ParticipantRole, ExtractedItem } from '@/lib/types'
 
 type Participant = {
   membershipId: string
@@ -340,6 +340,21 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
             {participantsError} Showing the manager and report only until then.
           </div>
         )}
+        {/* Transcript → next steps */}
+        <div className="bg-white rounded-xl border border-light-gray p-6">
+          <h2 className="text-lg font-bold text-deep-purple mb-2">Next Steps from Transcript</h2>
+          <p className="text-sm text-gray mb-4">
+            Paste a transcript to pull out the commitments that were actually made. Nothing lands on
+            the agenda until you accept it.
+          </p>
+          <TranscriptExtraction
+            meetingId={id}
+            participants={participants}
+            currentUserId={user.id}
+            onAccepted={refetch}
+          />
+        </div>
+
         {/* Weekly Commitments */}
         <div className="bg-white rounded-xl border border-light-gray p-6">
           <h2 className="text-lg font-bold text-deep-purple mb-2">Weekly Commitments</h2>
@@ -679,6 +694,164 @@ function TodoList({ todos, meetingId, isNew, onUpdate }: {
       <button onClick={addTodo} className="w-full border border-dashed border-light-gray rounded-lg py-2 text-xs text-gray hover:border-steel-blue hover:text-steel-blue transition">
         + Add to-do
       </button>
+    </div>
+  )
+}
+
+// ── Transcript extraction + review queue ──
+function TranscriptExtraction({ meetingId, participants, currentUserId, onAccepted }: {
+  meetingId: string, participants: Participant[], currentUserId: string, onAccepted: () => void
+}) {
+  const { items, loading, error: loadError, refetch } = useExtractedItems(meetingId)
+  const [transcript, setTranscript] = useState('')
+  const [extracting, setExtracting] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [busyId, setBusyId] = useState<string | null>(null)
+
+  const nameFor = (userId: string | null) => {
+    if (!userId) return 'Unassigned'
+    const p = participants.find(x => x.id === userId)
+    return p?.full_name || p?.email || 'Unknown'
+  }
+
+  const extract = async () => {
+    if (!transcript.trim() || extracting) return
+    setExtracting(true)
+    setActionError(null)
+    setNotice(null)
+    try {
+      const res = await fetch('/api/extract', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ meeting_id: meetingId, transcript, source: 'upload' }),
+      })
+      const json = await res.json()
+      if (!res.ok) {
+        setActionError(json.error || 'Extraction failed')
+      } else {
+        setTranscript('')
+        setNotice(json.count === 0
+          ? 'No commitments found in that transcript.'
+          : `Found ${json.count} item${json.count === 1 ? '' : 's'} to review.`)
+        await refetch()
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('Extraction request failed', err)
+      setActionError('Could not reach the extraction service.')
+    }
+    setExtracting(false)
+  }
+
+  const accept = async (item: ExtractedItem) => {
+    setBusyId(item.id)
+    setActionError(null)
+    const { error } = await acceptExtractedItem(item, currentUserId)
+    if (error) setActionError(error)
+    await refetch()
+    onAccepted()
+    setBusyId(null)
+  }
+
+  const reject = async (item: ExtractedItem) => {
+    setBusyId(item.id)
+    setActionError(null)
+    const { error } = await rejectExtractedItem(item.id, currentUserId)
+    if (error) setActionError(error)
+    await refetch()
+    setBusyId(null)
+  }
+
+  const problem = actionError || loadError
+  const targetLabel: Record<ExtractedItem['target'], string> = {
+    todo: 'TO-DO', commitment: 'COMMITMENT', issue: 'ISSUE',
+  }
+
+  return (
+    <div>
+      {problem && <div className="bg-red-light text-coral-red text-sm p-3 rounded-lg mb-4">{problem}</div>}
+      {notice && <div className="bg-[#e8f0fe] text-steel-blue text-sm p-3 rounded-lg mb-4">{notice}</div>}
+
+      {loading ? (
+        <p className="text-sm text-gray mb-4">Loading review queue...</p>
+      ) : items.length > 0 && (
+        <div className="space-y-2 mb-4">
+          <label className="text-[11px] font-bold uppercase tracking-wide text-medium-purple block">
+            Pending review ({items.length})
+          </label>
+          {items.map(item => (
+            <div key={item.id} className="border border-light-gray rounded-lg p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1 flex-wrap">
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-[#e8f0fe] text-steel-blue">
+                      {targetLabel[item.target]}
+                    </span>
+                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                      item.confidence === 'high' ? 'bg-green-light text-green'
+                      : item.confidence === 'medium' ? 'bg-amber-light text-[#e67e22]'
+                      : 'bg-red-light text-coral-red'
+                    }`}>
+                      {item.confidence.toUpperCase()}
+                    </span>
+                    {item.duplicate_of_id && (
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-light text-[#e67e22]">
+                        POSSIBLE DUPLICATE
+                      </span>
+                    )}
+                  </div>
+                  <div className="font-semibold text-sm text-near-black">{item.title}</div>
+                  <div className="text-xs text-gray mt-0.5">
+                    {nameFor(item.owner_id)}{item.due_date ? ` · Due ${item.due_date}` : ''}
+                  </div>
+                  {item.evidence && (
+                    <blockquote className="text-xs text-gray italic mt-2 pl-2 border-l-2 border-light-gray">
+                      &ldquo;{item.evidence}&rdquo;
+                    </blockquote>
+                  )}
+                </div>
+                <div className="flex flex-col gap-1 flex-shrink-0">
+                  <button
+                    onClick={() => accept(item)}
+                    disabled={busyId === item.id}
+                    className="bg-green text-white text-xs font-semibold px-3 py-1 rounded hover:bg-[#2d8a47] transition disabled:opacity-50"
+                  >
+                    Accept
+                  </button>
+                  <button
+                    onClick={() => reject(item)}
+                    disabled={busyId === item.id}
+                    className="border border-light-gray text-gray text-xs font-semibold px-3 py-1 rounded hover:border-coral-red hover:text-coral-red transition disabled:opacity-50"
+                  >
+                    Reject
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <textarea
+        value={transcript}
+        onChange={e => setTranscript(e.target.value)}
+        placeholder="Paste the full meeting transcript (from Granola, Gemini, or anywhere else)..."
+        rows={5}
+        className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm resize-y focus:border-steel-blue focus:outline-none"
+      />
+      <div className="flex items-center justify-between mt-2">
+        <span className="text-xs text-gray">
+          The transcript is not stored — only the items you accept.
+        </span>
+        <button
+          onClick={extract}
+          disabled={extracting || !transcript.trim()}
+          className="bg-medium-purple text-white font-semibold px-4 py-2 rounded-lg text-sm hover:bg-deep-purple transition disabled:opacity-50"
+        >
+          {extracting ? 'Extracting...' : 'Extract next steps'}
+        </button>
+      </div>
     </div>
   )
 }

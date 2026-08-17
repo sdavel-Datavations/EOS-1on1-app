@@ -1,5 +1,5 @@
 import { test, expect, Page } from '@playwright/test'
-import { seedAndLogin, createUser, login, commitmentsTableExists, participantsTableExists } from './playwright-auth'
+import { seedAndLogin, createUser, login, baseUrl, commitmentsTableExists, participantsTableExists } from './playwright-auth'
 
 async function signInAndStartMeeting(page: Page, name = 'E2E User') {
   const email = `e2e+${Date.now()}@example.com`
@@ -80,6 +80,22 @@ test('an added participant can open the meeting', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Weekly Commitments' })).toBeVisible({ timeout: 15000 })
   await expect(page.getByText('Loading meeting...')).toHaveCount(0)
   await expect(page.getByPlaceholder('Personal win...')).toHaveCount(2)
+})
+
+test('extraction endpoint rejects unauthenticated callers', async ({ request }) => {
+  // The whole point of the server-auth foundation: a route handler that holds an
+  // API key must know who is calling. No session cookie => no extraction.
+  const res = await request.post(`${baseUrl()}/api/extract`, {
+    data: { meeting_id: '00000000-0000-0000-0000-000000000000', transcript: 'Sam: I will send the numbers.' },
+  })
+  expect(res.status()).toBe(401)
+  expect((await res.json()).error).toContain('Not signed in')
+})
+
+test('extraction endpoint validates its input', async ({ request }) => {
+  const res = await request.post(`${baseUrl()}/api/extract`, { data: { transcript: 'x' } })
+  expect(res.status()).toBe(400)
+  expect((await res.json()).error).toContain('required')
 })
 
 test('weekly commitments save through RLS', async ({ page }) => {

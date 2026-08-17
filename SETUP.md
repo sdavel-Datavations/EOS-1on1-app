@@ -11,6 +11,9 @@
      that grant meeting access by membership rather than by manager/report only.
      Until this runs, a meeting shows just its manager and report, and anyone added
      as a third participant cannot open it. Safe to re-run.
+   - `supabase-transcripts.sql` — the `extracted_items` review queue behind
+     "Next Steps from Transcript". Depends on the access function created by
+     `supabase-participants.sql`, so run it after. Safe to re-run.
 3. Go to **Authentication > Providers** and make sure **Email** is enabled
 4. Go to **Settings > API** and copy:
    - **Project URL** (e.g. `https://abcdef.supabase.co`)
@@ -24,11 +27,16 @@ cd eos-1on1-app
 cp .env.local.example .env.local
 ```
 
-Edit `.env.local` with your Supabase credentials:
+Edit `.env.local` — see `.env.local.example` for every variable and what it's for.
+At minimum:
 ```
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key-here
 ```
+
+`ANTHROPIC_API_KEY` is additionally required for "Next Steps from Transcript".
+It is read server-side only — transcript content is sent to the Anthropic API for
+extraction, and this app stores only the items you accept, never the transcript.
 
 ```bash
 npm install
