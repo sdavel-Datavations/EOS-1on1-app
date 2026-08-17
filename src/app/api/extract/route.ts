@@ -5,10 +5,28 @@ import { z } from 'zod'
 import { requireMeetingAccess } from '@/lib/supabase-server'
 import { findExactDuplicate, type ExistingItem } from '@/lib/dedupe'
 
-// An Opus 5 extraction runs with thinking on, so a long transcript can take well
-// past a default serverless limit. Streaming keeps the HTTP connection alive;
-// this raises the platform's own ceiling.
+// Thinking is on, so a long transcript can take well past a default serverless
+// limit. Streaming keeps the HTTP connection alive; this raises the platform's
+// own ceiling.
 export const maxDuration = 300
+
+/**
+ * Sonnet by default, not Opus.
+ *
+ * Every extracted item goes to a review queue a human confirms before it reaches
+ * the agenda, so a wrong item costs a click — and paying for the most capable
+ * model is buying insurance the design already has. What is paid on every single
+ * use is latency, with someone waiting on the upload. Structured extraction
+ * against a fixed schema is well within Sonnet's range.
+ *
+ * Override with EXTRACTION_MODEL to compare on a real transcript; the model that
+ * ran comes back in the response so the comparison is unambiguous.
+ */
+const EXTRACTION_MODEL = process.env.EXTRACTION_MODEL || 'claude-sonnet-5'
+
+// Generous: it bounds thinking plus output, and only generated tokens are
+// billed. A handful of items needs a fraction of this.
+const MAX_TOKENS = 32000
 
 const ExtractionSchema = z.object({
   items: z.array(
@@ -129,9 +147,14 @@ export async function POST(req: Request) {
   try {
     // Streamed so a long transcript can't trip an HTTP request timeout.
     const stream = client.messages.stream({
-      model: 'claude-opus-5',
-      max_tokens: 64000,
+      model: EXTRACTION_MODEL,
+      max_tokens: MAX_TOKENS,
       system: SYSTEM_PROMPT,
+      // Explicit rather than inherited: the judgment calls here — commitment vs
+      // speculation, attributing to the committer rather than the asker, semantic
+      // dedupe — are what thinking helps with, and being explicit keeps the
+      // request identical whichever model EXTRACTION_MODEL names.
+      thinking: { type: 'adaptive' },
       output_config: { format: zodOutputFormat(ExtractionSchema) },
       messages: [
         {
@@ -175,7 +198,7 @@ ${transcript}`,
   }
 
   if (parsed.items.length === 0) {
-    return NextResponse.json({ data: [], count: 0 })
+    return NextResponse.json({ data: [], count: 0, model: EXTRACTION_MODEL })
   }
 
   const rows = parsed.items.map(item => {
@@ -210,5 +233,5 @@ ${transcript}`,
     return NextResponse.json({ error: message }, { status: 500 })
   }
 
-  return NextResponse.json({ data, count: data?.length ?? 0 })
+  return NextResponse.json({ data, count: data?.length ?? 0, model: EXTRACTION_MODEL })
 }

@@ -46,8 +46,30 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key-here
 ```
 
 `ANTHROPIC_API_KEY` is additionally required for "Next Steps from Transcript".
-It is read server-side only — transcript content is sent to the Anthropic API for
-extraction, and this app stores only the items you accept, never the transcript.
+It is read server-side only and never reaches the browser.
+
+This is **API billing** — metered pay-per-token against the Anthropic
+organization the key belongs to. It is not the same meter as a Claude
+subscription, and it does not draw from Claude Code usage limits. Use an ordinary
+key (`sk-ant-api…`), never an Admin key (`sk-ant-admin…`), and prefer a dedicated
+workspace with a spend limit so this app's spend is attributable and capped.
+
+What leaves your infrastructure on each call: the transcript, participant names
+and roles (falling back to email address where no name is set), and the titles of
+items already on that agenda. The app never stores the full transcript — but the
+short verbatim quote in each item's `evidence` field does persist in
+`extracted_items`.
+
+`EXTRACTION_MODEL` defaults to `claude-sonnet-5`. Every extracted item lands in a
+review queue a human confirms before it reaches the agenda, so a wrong item costs
+a click, whereas latency is paid on every upload with someone waiting. Set it to
+`claude-opus-5` to compare on a real transcript; the response reports which model
+ran.
+
+There is currently **no transcript size cap and no rate limit** on
+`/api/extract`. Any signed-in participant can submit an arbitrarily long
+transcript, repeatedly. A workspace spend limit is the backstop until that is
+fixed.
 
 ```bash
 npm install
