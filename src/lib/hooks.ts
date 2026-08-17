@@ -190,6 +190,18 @@ export function describeParticipantError(error: { code?: string; message: string
   return error.message
 }
 
+export function describeMeetingError(error: { code?: string; message: string }) {
+  // 42501 here almost always means the meetings SELECT policy re-queries
+  // public.meetings, so `insert ... returning` can't see its own row.
+  if (error.code === '42501' || /row-level security/i.test(error.message)) {
+    return 'The database rejected the new meeting (row-level security). Re-run supabase-participants.sql in the Supabase SQL editor.'
+  }
+  if (error.code === 'PGRST205') {
+    return 'Meetings table not found — run supabase-schema.sql in the Supabase SQL editor.'
+  }
+  return error.message
+}
+
 // ── Create a new meeting + seed from previous ──
 export async function createMeeting(managerId: string, reportId: string | null, date: string) {
   const sb = getSupabase()
@@ -200,7 +212,8 @@ export async function createMeeting(managerId: string, reportId: string | null, 
     .select()
     .single()
 
-  if (error || !meeting) return { error }
+  if (error) return { data: null, error }
+  if (!meeting) return { data: null, error: { message: 'The meeting was not created, and the database gave no reason.' } }
 
   // Seed membership — this is what grants access, so it goes first
   const participantRows: { meeting_id: string; user_id: string; role: ParticipantRole }[] = [
@@ -280,7 +293,7 @@ export async function createMeeting(managerId: string, reportId: string | null, 
     }
   }
 
-  return { data: meeting }
+  return { data: meeting, error: null }
 }
 
 // ── Upsert helpers (debounce in the component) ──
@@ -434,7 +447,20 @@ export async function createCommitment(item: {
 }
 
 export async function updateCommitment(id: string, fields: Partial<Commitment>) {
-  return getSupabase().from('weekly_commitments').update(fields).eq('id', id)
+  // .select() so an RLS-blocked update surfaces instead of returning success
+  // with zero rows affected — otherwise the checkbox appears to toggle and
+  // silently reverts on the next load.
+  const { data, error } = await getSupabase()
+    .from('weekly_commitments')
+    .update(fields)
+    .eq('id', id)
+    .select('id')
+
+  if (error) return { error }
+  if (!data || data.length === 0) {
+    return { error: { message: 'That change did not save — you may not have access to this commitment.' } }
+  }
+  return { error: null }
 }
 
 // ── Extraction review queue ──

@@ -1,6 +1,6 @@
 'use client'
 
-import { useAuth, useMeetings, createMeeting, deleteMeeting } from '@/lib/hooks'
+import { useAuth, useMeetings, createMeeting, deleteMeeting, describeMeetingError } from '@/lib/hooks'
 import { getResolvedSupabaseUrl } from '@/lib/supabase'
 import { useState } from 'react'
 import Link from 'next/link'
@@ -174,12 +174,16 @@ export default function Home() {
                   reportId = data.id
                 }
                 const today = new Date().toISOString().split('T')[0]
-                const { data } = await createMeeting(user.id, reportId, today)
-                if (data) {
-                  await refetch()
-                  window.location.href = `/meeting/${data.id}`
+                const { data, error: createError } = await createMeeting(user.id, reportId, today)
+                // Never fail silently here: the button just flipping back to
+                // "Start 1-on-1" is indistinguishable from a dead click.
+                if (createError || !data) {
+                  setError(createError ? describeMeetingError(createError) : 'Could not create the meeting.')
+                  setCreating(false)
+                  return
                 }
-                setCreating(false)
+                await refetch()
+                window.location.href = `/meeting/${data.id}`
               }}
               className="bg-steel-blue text-white font-semibold px-5 py-2 rounded-lg hover:bg-[#25698f] transition text-sm"
             >

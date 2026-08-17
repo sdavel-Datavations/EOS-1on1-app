@@ -61,7 +61,7 @@ test('an added participant can open the meeting', async ({ page }) => {
   const meetingUrl = page.url()
 
   await page.getByPlaceholder('Add participant email').fill(guestEmail)
-  await page.getByRole('button', { name: 'Add' }).click()
+  await page.getByRole('button', { name: 'Add', exact: true }).click()
   await expect(page.getByText('Guest Participant').first()).toBeVisible({ timeout: 10000 })
 
   // The guest gets their own segue box in the shared agenda
@@ -69,6 +69,7 @@ test('an added participant can open the meeting', async ({ page }) => {
 
   // The point of the participants table: the guest can actually load the meeting.
   // Under the old manager/report-only policies this hung on "Loading meeting...".
+  await page.goto('/') // Sign out lives in the dashboard header, not the meeting page
   await page.getByRole('button', { name: 'Sign out' }).click()
   await login(page, guestEmail, guestPassword)
 
@@ -162,8 +163,10 @@ test('weekly commitments save through RLS', async ({ page }) => {
   // assignee renders as a name, not a raw UUID
   await expect(page.getByText(`${name} · Due —`)).toBeVisible()
 
-  // Toggling done persists
+  // Toggling done persists. Wait for the toggle to land before reloading —
+  // reloading mid-PATCH aborts the request and tests nothing.
   await page.getByTitle('Mark as done').click()
+  await expect(page.getByTitle('Mark as open')).toBeVisible({ timeout: 10000 })
   await page.reload()
   await expect(page.getByTitle('Mark as open')).toBeVisible({ timeout: 10000 })
 })
