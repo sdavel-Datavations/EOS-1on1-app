@@ -30,11 +30,17 @@ There is no Anthropic key and no LLM dependency.
 2. **The Slack "Mark done" button works** — confirmed `[slack/complete/ok] closed via
    slack_button` — but the message-redraw fix deployed *after* that click. Press it again on
    the old message; it now self-heals.
-3. **Email is unproven.** `NOTIFY_FROM_EMAIL` was failing with Resend's `Invalid from field`.
-   A normalizer (trim, strip quotes, add missing angle brackets) is deployed, so it may
-   already work. Verify:
-   `curl -X GET https://eos-1on1-app.vercel.app/api/notify -H "Authorization: Bearer $CRON_SECRET"`
-   — returns per-channel results. `CRON_SECRET` is in `.env.local`.
+3. **Email had a doubled `@`** in `NOTIFY_FROM_EMAIL`
+   (`noreply@@marketing.task.datavations.com`), which is why nothing had ever sent. Fixed in
+   Vercel on 2026-08-18 and redeployed; the first successful send is still unconfirmed.
+   Found in `notification_log`, which named the offending value outright — Resend's own
+   message is a generic `Invalid from field` that names nothing, so the typo was invisible
+   both on screen and in the logs.
+   To confirm: create a task with Email ticked, then look for a
+   `channel=email status=sent` row in `notification_log`. If it fails there, the next
+   suspect is the sending domain not being verified in Resend.
+   Note `RESEND_API_KEY` and `NOTIFY_FROM_EMAIL` are **not** in `.env.local`, so email never
+   sends on localhost regardless — test this on the deployed app.
 4. **No meetings exist**, so the agenda, Rocks, and Import Next Steps have never run against
    real data.
 
