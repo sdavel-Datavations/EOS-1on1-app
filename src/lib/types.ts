@@ -107,6 +107,9 @@ export interface Commitment {
   // from the creator's profile; false keeps the task out of that shared view.
   department?: string | null
   visible_to_department?: boolean
+
+  // Added by supabase-subtasks.sql. One level only, enforced by a trigger.
+  parent_id?: string | null
 }
 
 /** A commitment with the date of the meeting it came from, for the tracker. */

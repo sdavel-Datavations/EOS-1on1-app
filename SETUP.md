@@ -22,6 +22,13 @@
      commitments policy to cover tasks that belong to no meeting, which is what
      the "My Week" panel adds mid-week. Until this runs, that panel can show
      commitments from meetings but cannot save a standalone task. Safe to re-run.
+   - `supabase-departments.sql` — `profiles.department`, and departmental
+     visibility for mid-week tasks. Read-only, and standalone tasks only:
+     commitments raised in a 1-on-1 stay private to the participants. Safe to re-run.
+   - `supabase-subtasks.sql` — `parent_id`, so a main task can hold subtasks. One
+     level deep, enforced by a trigger. A subtask inherits its parent's visibility,
+     otherwise a progress count would silently omit rows the reader can't see.
+     Safe to re-run.
    - `supabase-notifications.sql` — where each task's Slack message lives (so a
      threaded "done" reply can be matched back to it), the cached Slack user id,
      and `notification_log`. Until this runs, `/api/notify` fails. Safe to re-run.

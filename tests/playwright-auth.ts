@@ -63,6 +63,21 @@ export async function trackerReady() {
   return res.ok
 }
 
+/**
+ * True once supabase-subtasks.sql has been applied. Probes the column it adds,
+ * since the table long predates that migration.
+ */
+export async function subtasksReady() {
+  loadDotenvIfNeeded()
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  if (!url || !anon) return false
+  const res = await fetch(`${url}/rest/v1/weekly_commitments?select=parent_id&limit=1`, {
+    headers: { apikey: anon, Authorization: `Bearer ${anon}` },
+  })
+  return res.ok
+}
+
 /** True once supabase-access-control.sql has been applied. */
 export async function invitationsReady() {
   return tableExists('invitations')

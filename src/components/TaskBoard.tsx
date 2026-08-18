@@ -52,6 +52,9 @@ export default function TaskBoard({
   const [notice, setNotice] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [filter, setFilter] = useState<TaskFilter>('all')
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [subtaskFor, setSubtaskFor] = useState<string | null>(null)
+  const [subtaskTitle, setSubtaskTitle] = useState('')
 
   const today = todayISO()
 
@@ -71,8 +74,19 @@ export default function TaskBoard({
     }
     return true
   })
-  const open = visible.filter(c => c.status === 'open')
-  const done = completedThisWeek(visible.filter(c => c.status === 'done'), today)
+  // Subtasks render under their parent, never as their own bucket entry —
+  // otherwise a main task and its five subtasks read as six unrelated rows.
+  const subtasksOf = new Map<string, TrackedCommitment[]>()
+  for (const c of visible) {
+    if (!c.parent_id) continue
+    const list = subtasksOf.get(c.parent_id) || []
+    list.push(c)
+    subtasksOf.set(c.parent_id, list)
+  }
+  const topLevel = visible.filter(c => !c.parent_id)
+
+  const open = topLevel.filter(c => c.status === 'open')
+  const done = completedThisWeek(topLevel.filter(c => c.status === 'done'), today)
   const groups = groupByDue(open, today)
 
   const nameFor = (id: string | null) => {
@@ -144,6 +158,42 @@ export default function TaskBoard({
     }
     setSaving(false)
   }
+
+  const addSubtask = async (parent: TrackedCommitment) => {
+    if (!subtaskTitle.trim()) return
+    setBusyId(parent.id)
+    setSaveError(null)
+
+    const { data, error: createError } = await createStandaloneCommitment({
+      creator_id: userId,
+      // Defaults to whoever owns the main task; reassign afterwards if needed.
+      assignee_id: parent.assignee_id || userId,
+      title: subtaskTitle.trim(),
+      due_date: parent.due_date,
+      parent_id: parent.id,
+      // A subtask is a piece of the parent, so notifying each one turns a single
+      // handover into five DMs. The main task is what gets announced.
+      notify_slack: false,
+      notify_email: false,
+    })
+
+    if (createError || !data) {
+      setSaveError(createError ? describeCommitmentError(createError) : 'Could not add that subtask.')
+    } else {
+      setSubtaskTitle('')
+      setExpanded(prev => new Set(prev).add(parent.id))
+      await refetch()
+    }
+    setBusyId(null)
+  }
+
+  const toggleExpanded = (id: string) =>
+    setExpanded(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
 
   const toggle = async (c: TrackedCommitment) => {
     setBusyId(c.id)
@@ -299,16 +349,27 @@ export default function TaskBoard({
               </div>
               <div className="space-y-2">
                 {groups[bucket].map(c => (
-                  <Row
+                  <TaskGroup
                     key={c.id}
                     c={c}
+                    userId={userId}
+                    subtasks={subtasksOf.get(c.id) || []}
                     today={today}
                     nameFor={nameFor}
-                    busy={busyId === c.id}
+                    busyId={busyId}
                     notificationsReady={notificationsReady}
-                    userId={userId}
-                    onToggle={() => toggle(c)}
-                    onResend={() => resend(c)}
+                    expanded={expanded.has(c.id)}
+                    onExpand={() => toggleExpanded(c.id)}
+                    onToggle={toggle}
+                    onResend={resend}
+                    subtaskOpen={subtaskFor === c.id}
+                    onSubtaskOpen={() => {
+                      setSubtaskFor(subtaskFor === c.id ? null : c.id)
+                      setSubtaskTitle('')
+                    }}
+                    subtaskTitle={subtaskTitle}
+                    onSubtaskTitle={setSubtaskTitle}
+                    onSubtaskAdd={() => addSubtask(c)}
                   />
                 ))}
               </div>
@@ -344,7 +405,7 @@ export default function TaskBoard({
 }
 
 function Row({
-  c, today, nameFor, busy, notificationsReady, userId, onToggle, onResend,
+  c, today, nameFor, busy, notificationsReady, userId, onToggle, onResend, flat,
 }: {
   c: TrackedCommitment
   today: string
@@ -354,6 +415,8 @@ function Row({
   userId: string
   onToggle: () => void
   onResend: () => void
+  /** True when TaskGroup already draws the surrounding card. */
+  flat?: boolean
 }) {
   const isDone = c.status === 'done'
   const overdue = !isDone && c.due_date !== null && c.due_date < today
@@ -363,7 +426,13 @@ function Row({
   const completer = (c as TrackedCommitment & { completer?: { full_name: string | null } | null }).completer
 
   return (
-    <div className="flex items-center gap-3 p-3 bg-white border border-light-gray rounded-lg">
+    <div
+      className={
+        flat
+          ? 'flex items-center gap-3 p-3'
+          : 'flex items-center gap-3 p-3 bg-white border border-light-gray rounded-lg'
+      }
+    >
       {canEdit ? (
         <button
           onClick={onToggle}
@@ -441,6 +510,123 @@ function Row({
               {busy ? 'Sending...' : 'Notify'}
             </button>
           )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * A top-level task plus its subtasks.
+ *
+ * Progress is counted rather than stored: a `2 of 5` derived from the rows can't
+ * drift out of step with them, whereas a cached tally on the parent can.
+ */
+function TaskGroup({
+  c, userId, subtasks, today, nameFor, busyId, notificationsReady, expanded, onExpand,
+  onToggle, onResend, subtaskOpen, onSubtaskOpen, subtaskTitle, onSubtaskTitle, onSubtaskAdd,
+}: {
+  c: TrackedCommitment
+  userId: string
+  subtasks: TrackedCommitment[]
+  today: string
+  nameFor: (id: string | null) => string
+  busyId: string | null
+  notificationsReady: boolean
+  expanded: boolean
+  onExpand: () => void
+  onToggle: (c: TrackedCommitment) => void
+  onResend: (c: TrackedCommitment) => void
+  subtaskOpen: boolean
+  onSubtaskOpen: () => void
+  subtaskTitle: string
+  onSubtaskTitle: (value: string) => void
+  onSubtaskAdd: () => void
+}) {
+  const total = subtasks.length
+  const complete = subtasks.filter(s => s.status === 'done').length
+  const overdue = subtasks.filter(
+    s => s.status === 'open' && s.due_date !== null && s.due_date < today,
+  ).length
+  // An overdue subtask hidden inside a collapsed parent is the one thing this
+  // layout could make worse than a flat list, so it opens itself.
+  const isOpen = expanded || overdue > 0
+
+  return (
+    <div className={total > 0 ? 'border border-light-gray rounded-lg bg-white' : ''}>
+      <Row
+        c={c}
+        today={today}
+        nameFor={nameFor}
+        busy={busyId === c.id}
+        notificationsReady={notificationsReady}
+        userId={userId}
+        onToggle={() => onToggle(c)}
+        onResend={() => onResend(c)}
+        flat={total > 0}
+      />
+
+      <div className="flex items-center gap-3 px-3 pb-2 -mt-1 flex-wrap">
+        {total > 0 && (
+          <button
+            onClick={onExpand}
+            className="text-[11px] font-bold uppercase tracking-wide text-gray hover:text-steel-blue transition"
+          >
+            {isOpen ? '▾' : '▸'} {complete} of {total} done
+            {overdue > 0 && <span className="text-coral-red"> · {overdue} overdue</span>}
+          </button>
+        )}
+        {total > 0 && (
+          <div className="h-1.5 rounded-full bg-light-gray flex-1 min-w-[80px] max-w-[160px] overflow-hidden">
+            <div
+              className="h-full bg-green rounded-full transition-all"
+              style={{ width: `${Math.round((complete / total) * 100)}%` }}
+            />
+          </div>
+        )}
+        <button
+          onClick={onSubtaskOpen}
+          className="text-[11px] font-bold uppercase tracking-wide text-steel-blue hover:text-deep-purple transition"
+        >
+          {subtaskOpen ? 'Cancel' : '+ Subtask'}
+        </button>
+      </div>
+
+      {subtaskOpen && (
+        <div className="flex gap-2 px-3 pb-3">
+          <input
+            value={subtaskTitle}
+            onChange={e => onSubtaskTitle(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') onSubtaskAdd() }}
+            placeholder="What's the next piece of this?"
+            autoFocus
+            className="flex-1 border border-light-gray rounded-lg px-3 py-1.5 text-sm focus:border-steel-blue focus:outline-none"
+          />
+          <button
+            onClick={onSubtaskAdd}
+            disabled={busyId === c.id || !subtaskTitle.trim()}
+            className="bg-steel-blue text-white font-semibold px-3 py-1.5 rounded-lg text-xs hover:bg-[#25698f] transition disabled:opacity-50"
+          >
+            Add
+          </button>
+        </div>
+      )}
+
+      {isOpen && total > 0 && (
+        <div className="pl-6 pr-3 pb-3 space-y-2 border-l-2 border-light-gray ml-3">
+          {subtasks.map(sub => (
+            <Row
+              key={sub.id}
+              c={sub}
+              today={today}
+              nameFor={nameFor}
+              busy={busyId === sub.id}
+              notificationsReady={notificationsReady}
+              userId={userId}
+              onToggle={() => onToggle(sub)}
+              onResend={() => onResend(sub)}
+            />
+          ))}
         </div>
       )}
     </div>

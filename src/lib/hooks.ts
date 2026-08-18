@@ -460,8 +460,10 @@ export async function createStandaloneCommitment(item: {
   notify_email?: boolean
   notify_slack?: boolean
   visible_to_department?: boolean
+  /** Makes this a subtask of an existing task. One level only, enforced in the DB. */
+  parent_id?: string | null
 }) {
-  const base = {
+  const base: Record<string, unknown> = {
     meeting_id: null,
     creator_id: item.creator_id,
     assignee_id: item.assignee_id,
@@ -471,22 +473,41 @@ export async function createStandaloneCommitment(item: {
     notify_email: item.notify_email ?? true,
     notify_slack: item.notify_slack ?? true,
   }
+  if (item.parent_id) base.parent_id = item.parent_id
 
   const sb = getSupabase()
-  // Omitted when not specified so the database trigger picks the default —
-  // visible for a mid-week task, private for one raised in a 1-on-1.
+  // Omitted when not specified so the database default applies.
   const row =
     item.visible_to_department === undefined
       ? base
       : { ...base, visible_to_department: item.visible_to_department }
 
   const first = await sb.from('weekly_commitments').insert(row).select().single()
+  if (!first.error) return first
 
-  // Before supabase-departments.sql the column doesn't exist. Adding a task
-  // matters more than recording who it's shared with, so retry without it.
-  if (first.error && (first.error.code === 'PGRST204' || /visible_to_department/i.test(first.error.message))) {
-    return sb.from('weekly_commitments').insert(base).select().single()
+  // The two pending-migration cases need opposite treatment.
+  //
+  // visible_to_department is cosmetic: adding the task matters more than recording
+  // who it's shared with, so drop it and retry.
+  //
+  // parent_id is structural. Dropping it would quietly create a top-level task
+  // instead of the subtask that was asked for, which is worse than refusing — so
+  // this one names the migration and stops.
+  if (/parent_id/i.test(first.error.message) && item.parent_id) {
+    return {
+      data: null,
+      error: {
+        ...first.error,
+        message: 'Subtasks need supabase-subtasks.sql — run it in the Supabase SQL editor.',
+      },
+    }
   }
+
+  if (first.error.code === 'PGRST204' || /visible_to_department/i.test(first.error.message)) {
+    const { visible_to_department: _omitted, ...withoutFlag } = row as Record<string, unknown>
+    return sb.from('weekly_commitments').insert(withoutFlag).select().single()
+  }
+
   return first
 }
 

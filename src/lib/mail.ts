@@ -15,6 +15,50 @@ export function appBaseUrl(): string {
   return 'http://localhost:3000'
 }
 
+
+/**
+ * Normalises NOTIFY_FROM_EMAIL into something Resend accepts.
+ *
+ * Resend rejects anything that isn't `a@b.c` or `Name <a@b.c>`, and the ways a
+ * correct-looking value fails that are invisible on screen: a stray newline from a
+ * copy-paste, surrounding quotes kept literally by the dashboard, or a display
+ * name without angle brackets. Rather than fail with Resend's generic message,
+ * repair what is repairable and say precisely what is wrong otherwise.
+ */
+export function normalizeFromAddress(raw: string | undefined): { from?: string; error?: string } {
+  let value = (raw || '').replace(/[\r\n\t]+/g, ' ').trim()
+  if (!value) return { error: 'NOTIFY_FROM_EMAIL is empty' }
+
+  // Dashboards often keep quotes as part of the value.
+  const quoted = value.match(/^(['"])(.*)\1$/)
+  if (quoted) value = quoted[2].trim()
+  value = value.replace(/\s+/g, ' ')
+
+  const BARE = /^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/
+  const NAMED = /^(.+?)\s*<([^\s<>@]+@[^\s<>@]+\.[^\s<>@]+)>$/
+
+  if (BARE.test(value)) return { from: value }
+
+  const named = value.match(NAMED)
+  if (named) return { from: `${named[1].replace(/^["']|["']$/g, '').trim()} <${named[2]}>` }
+
+  // "Datavations 1-on-1 1on1@example.com" — a display name with the brackets
+  // forgotten, which is the most common way this goes wrong.
+  const parts = value.split(' ')
+  const last = parts[parts.length - 1]
+  if (parts.length > 1 && BARE.test(last)) {
+    return { from: `${parts.slice(0, -1).join(' ')} <${last}>` }
+  }
+
+  if (!value.includes('@')) {
+    return {
+      error: `NOTIFY_FROM_EMAIL must be an address, not a domain — try 1on1@${value.replace(/^@/, '')}`,
+    }
+  }
+
+  return { error: `NOTIFY_FROM_EMAIL is not a valid address: "${value}"` }
+}
+
 export async function sendMail(args: {
   to: string
   subject: string
@@ -22,8 +66,10 @@ export async function sendMail(args: {
   text: string
 }): Promise<{ error?: string }> {
   const key = process.env.RESEND_API_KEY
-  const from = process.env.NOTIFY_FROM_EMAIL
-  if (!key || !from) return { error: 'RESEND_API_KEY or NOTIFY_FROM_EMAIL is not configured' }
+  if (!key) return { error: 'RESEND_API_KEY is not configured' }
+
+  const { from, error: fromError } = normalizeFromAddress(process.env.NOTIFY_FROM_EMAIL)
+  if (!from) return { error: fromError || 'NOTIFY_FROM_EMAIL is not configured' }
 
   try {
     const { error } = await new Resend(key).emails.send({

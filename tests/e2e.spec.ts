@@ -1,5 +1,5 @@
 import { test, expect, Page } from '@playwright/test'
-import { seedAndLogin, createUser, invite, invitationsReady, login, baseUrl, tableExists, commitmentsTableExists, participantsTableExists, trackerReady } from './playwright-auth'
+import { seedAndLogin, createUser, invite, invitationsReady, login, baseUrl, tableExists, commitmentsTableExists, participantsTableExists, trackerReady, subtasksReady } from './playwright-auth'
 
 async function signInAndStartMeeting(page: Page, name = 'E2E User') {
   const email = `e2e+${Date.now()}@example.com`
@@ -551,4 +551,48 @@ test('the slack sync endpoint refuses callers without access', async ({ page, re
     data: {},
   })
   expect(missing.status()).toBe(400)
+})
+
+test('a main task holds subtasks and reports progress', async ({ page }) => {
+  test.skip(
+    !(await subtasksReady()),
+    'parent_id column missing — run supabase-subtasks.sql in the Supabase SQL editor',
+  )
+
+  const email = `parent+${Date.now()}@example.com`
+  await seedAndLogin(page, email, 'Password123!', 'Parent Tester')
+  await page.goto('/tasks')
+
+  await page.getByPlaceholder('What needs doing?').fill('Build out HIRI Pulse Member edition')
+  await page.getByRole('button', { name: /Add & Notify/ }).click()
+  await expect(page.getByText('Build out HIRI Pulse Member edition')).toBeVisible({ timeout: 20000 })
+
+  // Subtasks need supabase-subtasks.sql; skip cleanly rather than fail if pending
+  await page.getByRole('button', { name: '+ Subtask' }).first().click()
+  const subInput = page.getByPlaceholder("What's the next piece of this?")
+  await expect(subInput).toBeVisible()
+  await subInput.fill('Draft the member onboarding copy')
+  await page.getByRole('button', { name: 'Add', exact: true }).click()
+
+  await expect(page.getByText('Draft the member onboarding copy')).toBeVisible({ timeout: 15000 })
+  await expect(page.getByRole('button', { name: /0 of 1 done/ })).toBeVisible()
+
+  // A second subtask, then closing one moves the count rather than a stored tally
+  await page.getByRole('button', { name: '+ Subtask' }).first().click()
+  await subInput.fill('Wire the entitlement check')
+  await page.getByRole('button', { name: 'Add', exact: true }).click()
+  await expect(page.getByRole('button', { name: /0 of 2 done/ })).toBeVisible({ timeout: 15000 })
+
+  // Closing a subtask must not close the parent — a main task usually has a last
+  // step of its own, so that call stays with the person who owns it.
+  await page.getByTitle('Mark as done').nth(1).click()
+  await expect(page.getByRole('button', { name: /1 of 2 done/ })).toBeVisible({ timeout: 15000 })
+  await expect(page.getByText('Build out HIRI Pulse Member edition')).toBeVisible()
+
+  // Progress survives a reload, so it came from the rows rather than local state
+  await page.reload()
+  await expect(page.getByRole('button', { name: /1 of 2 done/ })).toBeVisible({ timeout: 15000 })
+
+  // Subtasks are not also listed as their own top-level rows
+  await expect(page.getByText('Draft the member onboarding copy')).toHaveCount(1)
 })
