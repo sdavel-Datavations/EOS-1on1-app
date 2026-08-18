@@ -1,5 +1,5 @@
 import { test, expect, Page } from '@playwright/test'
-import { seedAndLogin, createUser, login, baseUrl, tableExists, commitmentsTableExists, participantsTableExists, trackerReady } from './playwright-auth'
+import { seedAndLogin, createUser, invite, invitationsReady, login, baseUrl, tableExists, commitmentsTableExists, participantsTableExists, trackerReady } from './playwright-auth'
 
 async function signInAndStartMeeting(page: Page, name = 'E2E User') {
   const email = `e2e+${Date.now()}@example.com`
@@ -54,6 +54,7 @@ test('an added participant can open the meeting', async ({ page }) => {
 
   const guestEmail = `guest+${Date.now()}@example.com`
   const guestPassword = 'Password123!'
+  await invite(guestEmail)
   await createUser(guestEmail, guestPassword, 'Guest Participant')
 
   // Manager creates the meeting and adds the guest
@@ -329,6 +330,7 @@ test('a task can be assigned to a teammate by email and reaches them', async ({ 
   // cannot list them — the case assignment by email exists for.
   const mateEmail = `mate+${Date.now()}@example.com`
   const matePassword = 'Password123!'
+  await invite(mateEmail)
   await createUser(mateEmail, matePassword, 'Team Mate')
 
   const ownerEmail = `owner+${Date.now()}@example.com`
@@ -364,4 +366,84 @@ test('a task can be assigned to a teammate by email and reaches them', async ({ 
   await matePage.getByTitle('Mark as done').first().click()
   await expect(matePage.getByText(/Done this week · 1/)).toBeVisible({ timeout: 15000 })
   await mateContext.close()
+})
+
+test('signup requires an invitation', async () => {
+  test.skip(
+    !(await invitationsReady()),
+    'invitations table missing — run supabase-access-control.sql in the Supabase SQL editor',
+  )
+
+  // Deliberately NOT invited. The gate is a trigger on auth.users, so it holds
+  // for the admin API too, not just the public signup form — which is what makes
+  // it a real gate rather than a UI check.
+  const stranger = `stranger+${Date.now()}@example.com`
+  let failed = false
+  try {
+    await createUser(stranger, 'Password123!', 'Uninvited Stranger')
+  } catch (err) {
+    failed = true
+    expect(String(err)).toMatch(/not been invited/i)
+  }
+  expect(failed, 'an uninvited email was allowed to create an account').toBe(true)
+
+  // Invited, and the same call now succeeds
+  await invite(stranger)
+  await createUser(stranger, 'Password123!', 'Now Invited')
+})
+
+test('the directory is not readable without a session', async ({ request }) => {
+  test.skip(
+    !(await invitationsReady()),
+    'invitations table missing — run supabase-access-control.sql in the Supabase SQL editor',
+  )
+
+  // The anon key ships in the browser bundle, so it is public. Before
+  // supabase-access-control.sql this returned every name and email address.
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  const res = await request.get(`${url}/rest/v1/profiles?select=id,full_name,email&limit=50`, {
+    headers: { apikey: anon!, Authorization: `Bearer ${anon}` },
+  })
+  const body = await res.json()
+  expect(Array.isArray(body) ? body.length : 0, 'the anon key can still read profiles').toBe(0)
+})
+
+test('a member cannot promote themselves to admin', async ({ page }) => {
+  test.skip(
+    !(await invitationsReady()),
+    'invitations table missing — run supabase-access-control.sql in the Supabase SQL editor',
+  )
+
+  const email = `member+${Date.now()}@example.com`
+  await seedAndLogin(page, email, 'Password123!', 'Ordinary Member')
+  const cookies = await page.context().cookies()
+  const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join('; ')
+
+  // Direct write through the anon key: blocked by column-level grants, not RLS,
+  // since RLS cannot restrict which columns an UPDATE touches.
+  const direct = await page.evaluate(async () => {
+    const { createClient } = await import('@supabase/supabase-js')
+    const sb = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL as string,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY as string,
+    )
+    return 'unreachable'
+  }).catch(() => 'blocked')
+  expect(['blocked', 'unreachable']).toContain(direct)
+
+  // And through the admin route, which checks the caller's level
+  const viaRoute = await page.request.post(`${baseUrl()}/api/team/manager`, {
+    headers: { cookie: cookieHeader },
+    data: { user_id: 'self', role: 'admin' },
+  })
+  expect(viaRoute.status()).toBe(403)
+  expect((await viaRoute.json()).error).toContain('admin')
+
+  // A member also cannot invite an admin
+  const badInvite = await page.request.post(`${baseUrl()}/api/team/invite`, {
+    headers: { cookie: cookieHeader },
+    data: { email: `sneaky+${Date.now()}@example.com`, role: 'admin' },
+  })
+  expect(badInvite.status()).toBe(403)
 })

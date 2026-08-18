@@ -1,0 +1,302 @@
+'use client'
+
+import { useEffect, useState, useCallback } from 'react'
+import Link from 'next/link'
+import { useAuth } from '@/lib/hooks'
+import { createClient } from '@/lib/supabase'
+
+type Person = {
+  id: string
+  full_name: string | null
+  email: string | null
+  access_level: 'member' | 'manager' | 'admin' | null
+  manager_id: string | null
+}
+
+type Invite = {
+  id: string
+  email: string
+  access_level: string
+  manager_id: string | null
+  accepted_at: string | null
+}
+
+const LEVELS = ['member', 'manager', 'admin'] as const
+
+export default function TeamPage() {
+  const { user, loading: authLoading, signOut } = useAuth()
+
+  const [people, setPeople] = useState<Person[]>([])
+  const [invites, setInvites] = useState<Invite[]>([])
+  const [loading, setLoading] = useState(true)
+  const [notReady, setNotReady] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  const [email, setEmail] = useState('')
+  const [managerId, setManagerId] = useState('')
+  const [level, setLevel] = useState<(typeof LEVELS)[number]>('member')
+
+  const isAdmin = user?.access_level === 'admin'
+
+  const load = useCallback(async () => {
+    if (!user) return
+    const sb = createClient()
+
+    const { data: profiles, error: profileError } = await sb
+      .from('profiles')
+      .select('id, full_name, email, access_level, manager_id')
+      .order('full_name')
+
+    if (profileError && /access_level|does not exist|could not find/i.test(profileError.message)) {
+      setNotReady(true)
+      setLoading(false)
+      return
+    }
+    setPeople((profiles as Person[]) || [])
+
+    // No insert policy on invitations, so this read is the only client access.
+    const { data: pending } = await sb
+      .from('invitations')
+      .select('id, email, access_level, manager_id, accepted_at')
+      .is('accepted_at', null)
+      .order('created_at', { ascending: false })
+    setInvites((pending as Invite[]) || [])
+
+    setLoading(false)
+  }, [user])
+
+  useEffect(() => { load() }, [load])
+
+  const post = async (path: string, body: unknown) => {
+    setBusy(true)
+    setError(null)
+    setNotice(null)
+    const res = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const json = await res.json()
+    setBusy(false)
+    if (!res.ok) {
+      setError(json.error || 'That did not work')
+      return null
+    }
+    await load()
+    return json
+  }
+
+  const invite = async () => {
+    if (!email.trim()) return
+    const result = await post('/api/team/invite', {
+      email: email.trim(),
+      manager_id: managerId || null,
+      role: level,
+    })
+    if (result) {
+      setNotice(`${email.trim()} can now sign up. They'll land under the manager you picked.`)
+      setEmail('')
+    }
+  }
+
+  const setManager = async (userId: string, newManagerId: string) => {
+    const result = await post('/api/team/manager', { user_id: userId, manager_id: newManagerId || null })
+    if (result) setNotice('Reporting line updated.')
+  }
+
+  const setLevelFor = async (userId: string, newLevel: string) => {
+    const person = people.find(p => p.id === userId)
+    const result = await post('/api/team/manager', {
+      user_id: userId,
+      manager_id: person?.manager_id ?? null,
+      role: newLevel,
+    })
+    if (result) setNotice('Access level updated.')
+  }
+
+  if (authLoading) {
+    return <div className="flex items-center justify-center min-h-screen"><div className="text-gray">Loading...</div></div>
+  }
+
+  if (!user) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <p className="text-gray mb-3">You need to be signed in.</p>
+          <Link href="/" className="text-steel-blue font-semibold hover:underline">Go to sign in</Link>
+        </div>
+      </div>
+    )
+  }
+
+  const nameFor = (id: string | null) => {
+    if (!id) return '—'
+    const p = people.find(x => x.id === id)
+    return p?.full_name || p?.email || 'Unknown'
+  }
+
+  // Only people who can actually hold reports, to keep the picker usable.
+  const possibleManagers = people.filter(p => p.access_level === 'manager' || p.access_level === 'admin')
+
+  return (
+    <div className="min-h-screen">
+      <header className="bg-deep-purple px-6 py-4 flex items-center justify-between sticky top-0 z-50">
+        <div className="flex items-center gap-4">
+          <span className="text-white font-bold tracking-wider text-lg">DATAVATIONS</span>
+          <nav className="flex items-center gap-3 text-sm">
+            <Link href="/" className="text-white/60 hover:text-white transition">Agenda</Link>
+            <Link href="/tasks" className="text-white/60 hover:text-white transition">Tasks</Link>
+            <span className="text-white font-semibold">Team</span>
+          </nav>
+        </div>
+        <div className="flex items-center gap-4">
+          <span className="text-steel-blue font-semibold text-sm">{user.full_name}</span>
+          <button onClick={signOut} className="text-white/60 text-sm hover:text-white transition">Sign out</button>
+        </div>
+      </header>
+
+      <main className="max-w-3xl mx-auto px-4 py-8">
+        <h1 className="text-lg font-bold text-deep-purple mb-1">Team</h1>
+        <div className="w-14 h-[3px] bg-steel-blue rounded mb-2" />
+        <p className="text-sm text-gray mb-6">
+          Signup is invite-only. Inviting someone under a manager is what lets that manager see
+          their 1-on-1s and tasks &mdash; read-only, so oversight never means editing an agenda.
+        </p>
+
+        {notReady && (
+          <div className="bg-amber-light text-[#e67e22] text-sm p-3 rounded-lg mb-4">
+            Access control isn&apos;t set up yet &mdash; run <strong>supabase-access-control.sql</strong> in
+            the Supabase SQL editor.
+          </div>
+        )}
+        {error && <div className="bg-red-light text-coral-red text-sm p-3 rounded-lg mb-4">{error}</div>}
+        {notice && <div className="bg-[#e8f0fe] text-steel-blue text-sm p-3 rounded-lg mb-4">{notice}</div>}
+
+        {!notReady && (
+          <>
+            <div className="bg-white rounded-xl border border-light-gray p-5 mb-8">
+              <h2 className="text-sm font-bold text-deep-purple mb-3">Invite someone</h2>
+              <div className="flex gap-2 items-end flex-wrap">
+                <div className="flex-1 min-w-[200px]">
+                  <label className="text-[11px] font-bold uppercase tracking-wide text-gray block mb-1">Email</label>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={e => setEmail(e.target.value)}
+                    placeholder="name@datavations.com"
+                    className="border border-light-gray rounded-lg px-3 py-2 text-sm w-full focus:border-steel-blue focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-bold uppercase tracking-wide text-gray block mb-1">Manager</label>
+                  <select
+                    value={managerId}
+                    onChange={e => setManagerId(e.target.value)}
+                    className="border border-light-gray rounded-lg px-3 py-2 text-sm focus:border-steel-blue focus:outline-none"
+                  >
+                    <option value="">No manager</option>
+                    {possibleManagers.map(p => (
+                      <option key={p.id} value={p.id}>{p.full_name || p.email}</option>
+                    ))}
+                  </select>
+                </div>
+                {isAdmin && (
+                  <div>
+                    <label className="text-[11px] font-bold uppercase tracking-wide text-gray block mb-1">Access</label>
+                    <select
+                      value={level}
+                      onChange={e => setLevel(e.target.value as (typeof LEVELS)[number])}
+                      className="border border-light-gray rounded-lg px-3 py-2 text-sm focus:border-steel-blue focus:outline-none"
+                    >
+                      {LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
+                    </select>
+                  </div>
+                )}
+                <button
+                  onClick={invite}
+                  disabled={busy || !email.trim()}
+                  className="bg-steel-blue text-white font-semibold px-4 py-2 rounded-lg text-sm hover:bg-[#25698f] transition disabled:opacity-50"
+                >
+                  {busy ? 'Inviting...' : 'Invite'}
+                </button>
+              </div>
+              {!isAdmin && (
+                <p className="text-xs text-gray mt-3">
+                  You can invite people reporting to you. Only an admin can grant manager or admin access.
+                </p>
+              )}
+            </div>
+
+            {invites.length > 0 && (
+              <>
+                <h2 className="text-sm font-bold text-deep-purple mb-2">
+                  Invited, not signed up yet &middot; {invites.length}
+                </h2>
+                <div className="space-y-2 mb-8">
+                  {invites.map(i => (
+                    <div key={i.id} className="flex items-center justify-between bg-white border border-light-gray rounded-lg p-3">
+                      <span className="text-sm text-near-black">{i.email}</span>
+                      <span className="text-xs text-gray">
+                        {i.access_level} &middot; reports to {nameFor(i.manager_id)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+
+            <h2 className="text-sm font-bold text-deep-purple mb-2">
+              People {loading ? '' : `· ${people.length}`}
+            </h2>
+            {loading ? (
+              <p className="text-sm text-gray">Loading...</p>
+            ) : (
+              <div className="space-y-2">
+                {people.map(p => (
+                  <div key={p.id} className="flex items-center gap-3 bg-white border border-light-gray rounded-lg p-3 flex-wrap">
+                    <div className="flex-1 min-w-[160px]">
+                      <div className="font-semibold text-sm text-near-black">
+                        {p.full_name || '(no name)'}
+                        {p.id === user.id && <span className="text-xs text-gray font-normal"> &middot; you</span>}
+                      </div>
+                      <div className="text-xs text-gray">{p.email}</div>
+                    </div>
+                    {isAdmin ? (
+                      <>
+                        <select
+                          value={p.manager_id || ''}
+                          onChange={e => setManager(p.id, e.target.value)}
+                          disabled={busy}
+                          className="border border-light-gray rounded px-2 py-1 text-xs focus:border-steel-blue focus:outline-none disabled:opacity-50"
+                        >
+                          <option value="">No manager</option>
+                          {possibleManagers.filter(m => m.id !== p.id).map(m => (
+                            <option key={m.id} value={m.id}>{m.full_name || m.email}</option>
+                          ))}
+                        </select>
+                        <select
+                          value={p.access_level || 'member'}
+                          onChange={e => setLevelFor(p.id, e.target.value)}
+                          disabled={busy}
+                          className="border border-light-gray rounded px-2 py-1 text-xs focus:border-steel-blue focus:outline-none disabled:opacity-50"
+                        >
+                          {LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
+                        </select>
+                      </>
+                    ) : (
+                      <span className="text-xs text-gray">
+                        {p.access_level || 'member'} &middot; reports to {nameFor(p.manager_id)}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </main>
+    </div>
+  )
+}

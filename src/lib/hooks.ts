@@ -161,18 +161,14 @@ export function useMeeting(meetingId: string) {
 // ── Participants ──
 export async function addParticipantByEmail(meetingId: string, email: string, role: ParticipantRole = 'participant') {
   const sb = getSupabase()
-  const { data: profile, error: lookupError } = await sb
-    .from('profiles')
-    .select('id')
-    .eq('email', email.trim().toLowerCase())
-    .maybeSingle()
-
-  if (lookupError) return { error: lookupError.message }
-  if (!profile) return { error: 'No account with that email. They need to sign up first.' }
+  // Via the RPC for the same reason as findProfileByEmail: someone you have never
+  // shared a meeting with is invisible under the profiles policy by design.
+  const { id, error: lookupError } = await findProfileByEmail(email)
+  if (!id) return { error: lookupError || 'No account with that email.' }
 
   const { error } = await sb
     .from('meeting_participants')
-    .insert({ meeting_id: meetingId, user_id: profile.id, role })
+    .insert({ meeting_id: meetingId, user_id: id, role })
 
   // 23505 = unique_violation on (meeting_id, user_id)
   if (error && error.code === '23505') return { error: 'Already a participant.' }
@@ -598,15 +594,31 @@ export async function findProfileByEmail(
   const cleaned = email.trim().toLowerCase()
   if (!cleaned) return { error: 'Enter an email address.' }
 
-  const { data, error } = await getSupabase()
-    .from('profiles')
-    .select('id, full_name')
-    .eq('email', cleaned)
-    .maybeSingle()
+  // An RPC, not a select: profiles is scoped to people you actually work with, so
+  // a direct query can't reach a teammate who shares no meeting with you yet.
+  // find_profile_by_email answers one exact address and returns no list, so the
+  // directory stays closed to enumeration.
+  const sb = getSupabase()
+  let { data, error } = await sb.rpc('find_profile_by_email', { p_email: cleaned })
+
+  // Before supabase-access-control.sql the function doesn't exist and profiles is
+  // still readable directly, so fall back rather than breaking a working flow on
+  // a migration that hasn't run yet.
+  if (error && (error.code === 'PGRST202' || /function|schema cache/i.test(error.message))) {
+    const direct = await sb
+      .from('profiles')
+      .select('id, full_name')
+      .eq('email', cleaned)
+      .maybeSingle()
+    data = direct.data ? [direct.data] : []
+    error = direct.error
+  }
 
   if (error) return { error: error.message }
-  if (!data) return { error: `No account for ${cleaned} — they need to sign up first.` }
-  return { id: data.id as string, fullName: (data.full_name as string) || undefined }
+
+  const match = Array.isArray(data) ? data[0] : data
+  if (!match?.id) return { error: `No account for ${cleaned} — they need an invitation first.` }
+  return { id: match.id as string, fullName: (match.full_name as string) || undefined }
 }
 
 /** People who share at least one meeting with this user — the plausible assignees. */

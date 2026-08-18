@@ -63,6 +63,33 @@ export async function trackerReady() {
   return res.ok
 }
 
+/** True once supabase-access-control.sql has been applied. */
+export async function invitationsReady() {
+  return tableExists('invitations')
+}
+
+/**
+ * Records an invitation, which signup requires.
+ *
+ * Tests invite and then sign up, the same order a real person goes through,
+ * rather than having the dev user-creation route bypass the gate — a bypass would
+ * leave the gate itself untested. Tolerates the table being absent so the suite
+ * passes both before and after that migration.
+ */
+export async function invite(email: string, opts: { role?: string; managerId?: string | null } = {}) {
+  loadDotenvIfNeeded()
+  const resp = await fetch(`${baseUrl()}/api/dev/invite`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, role: opts.role, managerId: opts.managerId ?? null }),
+  })
+  if (resp.ok) return
+  const body = await resp.text()
+  // Migration not applied yet: signup isn't gated, so there is nothing to record.
+  if (body.includes('PGRST205') || body.includes('invitations')) return
+  throw new Error(`dev invite failed (${resp.status}): ${body}`)
+}
+
 /** Creates a pre-confirmed user, so tests never wait on confirmation email. */
 export async function createUser(email: string, password: string, fullName = '') {
   loadDotenvIfNeeded()
@@ -95,6 +122,7 @@ export async function login(page: Page, email: string, password: string) {
 }
 
 export async function seedAndLogin(page: Page, email: string, password: string, fullName = '') {
+  await invite(email)
   await createUser(email, password, fullName)
   await login(page, email, password)
 }

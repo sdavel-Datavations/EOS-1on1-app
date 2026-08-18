@@ -133,6 +133,7 @@ export default function Home() {
           <nav className="flex items-center gap-3 text-sm">
             <span className="text-white font-semibold">Agenda</span>
             <Link href="/tasks" className="text-white/60 hover:text-white transition">Tasks</Link>
+            <Link href="/team" className="text-white/60 hover:text-white transition">Team</Link>
           </nav>
         </div>
         <div className="flex items-center gap-4">

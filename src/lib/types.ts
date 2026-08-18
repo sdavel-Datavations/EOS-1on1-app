@@ -3,6 +3,9 @@ export interface Profile {
   full_name: string
   email: string
   role: 'manager' | 'report'
+  /** Added by supabase-access-control.sql. */
+  access_level?: 'member' | 'manager' | 'admin'
+  manager_id?: string | null
 }
 
 export interface Meeting {
@@ -170,3 +173,13 @@ export const SECTIONS = [
   { key: 'ids', title: 'Issues — Identify, Discuss, Solve', label: '14 MINUTES', allotted: 840 },
   { key: 'todos', title: 'To-Dos & Wrap', label: '5 MINUTES', allotted: 300 },
 ] as const
+
+export interface Invitation {
+  id: string
+  email: string
+  manager_id: string | null
+  access_level: 'member' | 'manager' | 'admin'
+  invited_by: string | null
+  accepted_at: string | null
+  created_at: string
+}

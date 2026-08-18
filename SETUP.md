@@ -25,6 +25,12 @@
    - `supabase-notifications.sql` — where each task's Slack message lives (so a
      threaded "done" reply can be matched back to it), the cached Slack user id,
      and `notification_log`. Until this runs, `/api/notify` fails. Safe to re-run.
+   - `supabase-access-control.sql` — **closes a live leak.** `public.profiles` was
+     readable with the anon key and no session, and that key ships in the browser
+     bundle, so every name and email address was effectively public. Also makes
+     signup invite-only, adds the manager reporting line, and adds the admin tier.
+     Edit the email at the bottom of the file if the first admin isn't
+     `sam@datavations.com`. Safe to re-run.
 3. Go to **Authentication > Providers** and make sure **Email** is enabled
 4. Go to **Settings > API** and copy:
    - **Project URL** (e.g. `https://abcdef.supabase.co`)
@@ -134,7 +140,46 @@ words is treated as discussion. The button is the unambiguous path. Every
 completion records who closed it and how, in `weekly_commitments.completed_via`
 and `notification_log`.
 
-## 5. Supabase Auth — Redirect URLs
+## 5. Who Can See What
+
+Set by `supabase-access-control.sql`.
+
+**Signup is invite-only.** The gate is a trigger on `auth.users`, so it holds for
+the admin API too — not just the signup form. `public.invitations` has no insert
+policy at all, so the anon key cannot mint one; invitations are created only
+through `/api/team/invite`, which requires a session.
+
+**Inviting someone under a manager is what grants that manager visibility.** On
+signup the invitation's manager and access level are copied onto the new profile.
+
+**Access levels** — `member`, `manager`, `admin`:
+
+| | Sees |
+|---|---|
+| member | Their own 1-on-1s, and tasks they're assigned or assigned out |
+| manager | The above, plus everything belonging to anyone below them in the reporting line, at any depth |
+| admin | Everything |
+
+Depth means a skip-level manager inherits access without it being granted twice —
+so "higher ups want access" is handled by the reporting line, not by making more
+admins.
+
+**Oversight is read-only.** A manager or admin can see a report's agenda and tasks
+but cannot edit them. This is done with separate `FOR SELECT` policies rather than
+by widening the participation policy, which covers writes.
+
+**Nobody can promote themselves.** RLS can't restrict which columns an `UPDATE`
+touches, so table-level `UPDATE` on `profiles` is revoked from `authenticated` and
+only `full_name` is granted back. `access_level` and `manager_id` change only
+through `/api/team/manager`, which runs with the service role *after* reading the
+caller's own level through their own client. Every change is recorded in
+`notification_log`.
+
+**Manage it at `/team`** — invite with a manager and access level, and change
+reporting lines. Reporting loops are rejected before they're written, since a
+cycle would make the hierarchy walk stop finding people rather than error.
+
+## 6. Supabase Auth — Redirect URLs
 
 In Supabase Dashboard > Authentication > URL Configuration, add your Vercel URL to **Redirect URLs**:
 ```
