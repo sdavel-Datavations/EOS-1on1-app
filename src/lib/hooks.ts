@@ -3,6 +3,7 @@ import { createClient } from './supabase'
 import { findExactDuplicate, type ExistingItem } from './dedupe'
 import { parseActionItems, resolveOwner } from './parse-action-items'
 import { partitionOpenWork, EMPTY_OPEN_WORK, type OpenWork } from './open-work'
+import { summarizeNotify, type NotifySummary } from './notify-outcome'
 import type { Rock, RockCheckin, RockStatus, Meeting, SegueNote, ScorecardItem, Headline, Issue, Todo, SectionTimer, Profile, Commitment, TrackedCommitment, Teammate, MeetingParticipant, ParticipantRole, ExtractedItem } from './types'
 
 function getSupabase() {
@@ -660,7 +661,13 @@ export function useOpenWork(meetingId: string, ownerIds: string[]) {
  * tomorrow — and the Slack message is also what makes "reply done" possible at
  * all, since a threaded reply is matched back to the task by its message id.
  */
-export async function notifyCommitment(id: string): Promise<{ error: string | null; sent?: boolean }> {
+export async function notifyCommitment(id: string): Promise<{
+  /** Set only when the request itself failed, so no channel was even attempted. */
+  error: string | null
+  sent: boolean
+  summary: NotifySummary
+}> {
+  const nothing: NotifySummary = { sent: [], problems: [] }
   try {
     const res = await fetch('/api/notify', {
       method: 'POST',
@@ -668,16 +675,16 @@ export async function notifyCommitment(id: string): Promise<{ error: string | nu
       body: JSON.stringify({ commitment_id: id }),
     })
     const json = await res.json()
-    if (!res.ok) return { error: json.error || 'Could not send the notification' }
-    const outcome = json.results?.[0]
-    const sent = outcome?.slack === 'sent' || outcome?.email === 'sent'
-    if (!sent) {
-      const why = [outcome?.slack, outcome?.email].filter(Boolean).join('; ')
-      return { error: why || 'Nothing was sent — no channel is configured for this task.' }
+    if (!res.ok) {
+      return { error: json.error || 'Could not send the notification', sent: false, summary: nothing }
     }
-    return { error: null, sent: true }
+    // Every channel is reported, not just whether any one of them worked. One
+    // channel succeeding used to be enough to call the whole send a success,
+    // which is how a broken email setup stayed invisible in the UI.
+    const summary = summarizeNotify(json.results?.[0])
+    return { error: null, sent: summary.sent.length > 0, summary }
   } catch {
-    return { error: 'Could not reach the notification service.' }
+    return { error: 'Could not reach the notification service.', sent: false, summary: nothing }
   }
 }
 

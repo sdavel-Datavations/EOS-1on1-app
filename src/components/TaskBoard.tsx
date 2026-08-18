@@ -16,6 +16,7 @@ import type { DoneBucket } from '@/lib/tracker'
 import { BUCKET_ORDER, BUCKET_LABEL, COMPLETED_VIA_LABEL } from '@/lib/types'
 import type { TrackedCommitment, DueBucket, TaskFilter } from '@/lib/types'
 import { isTopLevel } from '@/lib/open-work'
+import { notifyNotice } from '@/lib/notify-outcome'
 
 const BUCKET_TONE: Record<DueBucket, string> = {
   overdue: 'text-coral-red',
@@ -152,14 +153,14 @@ export default function TaskBoard({
     // Slack message a "done" reply gets matched back to, so without it the reply
     // path simply isn't available for this task.
     if (notifySlack || notifyEmail) {
-      const { error: notifyError } = await notifyCommitment(data.id)
+      const { error: notifyError, summary } = await notifyCommitment(data.id)
       // Name the assignee either way: knowing the task was created but the DM
       // failed is only useful if you also know who was meant to get it.
       const who = targetId === userId ? 'you' : targetLabel
       setNotice(
         notifyError
           ? `Task added for ${who}, but not sent: ${notifyError}`
-          : `Task added and sent to ${who}.`,
+          : `Task added. ${notifyNotice(summary, who)}`,
       )
     } else {
       const who = targetId === userId ? 'you' : targetLabel
@@ -213,12 +214,12 @@ export default function TaskBoard({
     await refetch()
 
     if (handover && (notifySlack || notifyEmail)) {
-      const { error: notifyError } = await notifyCommitment(data.id)
+      const { error: notifyError, summary } = await notifyCommitment(data.id)
       const who = nameFor(owner)
       setNotice(
         notifyError
           ? `Subtask added for ${who}, but not sent: ${notifyError}`
-          : `Subtask added and sent to ${who}.`,
+          : `Subtask added. ${notifyNotice(summary, who)}`,
       )
     }
     setBusyId(null)
@@ -253,8 +254,10 @@ export default function TaskBoard({
     setBusyId(c.id)
     setSaveError(null)
     setNotice(null)
-    const { error: notifyError } = await notifyCommitment(c.id)
-    setNotice(notifyError ? `Not sent: ${notifyError}` : `Sent to ${nameFor(c.assignee_id)}.`)
+    const { error: notifyError, summary } = await notifyCommitment(c.id)
+    setNotice(
+      notifyError ? `Not sent: ${notifyError}` : notifyNotice(summary, nameFor(c.assignee_id)),
+    )
     await refetch()
     setBusyId(null)
   }
