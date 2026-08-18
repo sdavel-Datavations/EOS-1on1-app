@@ -193,3 +193,40 @@ export interface Invitation {
   accepted_at: string | null
   created_at: string
 }
+
+export type RockStatus = 'on_track' | 'off_track' | 'done' | 'dropped'
+
+export const ROCK_STATUS_LABEL: Record<RockStatus, string> = {
+  on_track: 'On track',
+  off_track: 'Off track',
+  done: 'Done',
+  dropped: 'Dropped',
+}
+
+/** A 90-day priority owned by a person, not a row on one meeting's agenda. */
+export interface Rock {
+  id: string
+  owner_id: string
+  title: string
+  description: string
+  /** '2026-Q3' */
+  quarter: string
+  status: RockStatus
+  created_by: string | null
+  sort_order: number
+  created_at: string
+  updated_at: string
+  // Joined
+  owner?: Profile
+  checkin?: RockCheckin | null
+}
+
+/** This week's pulse on a Rock. One per rock per meeting. */
+export interface RockCheckin {
+  id: string
+  rock_id: string
+  meeting_id: string
+  on_track: boolean
+  note: string
+  recorded_by: string | null
+}

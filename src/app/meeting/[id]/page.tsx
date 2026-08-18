@@ -2,9 +2,10 @@
 
 import { use, useState, useEffect, useRef, useCallback } from 'react'
 import Link from 'next/link'
-import { useAuth, useMeeting, updateSegueNote, upsertSegueNote, updateHeadline, upsertHeadline, upsertScorecardItem, deleteScorecardItem, upsertIssue, deleteIssue, upsertTodo, deleteTodo, updateMeeting, updateSectionTimer, useCommitments, createCommitment, updateCommitment, setCommitmentStatus, describeCommitmentError, addParticipantByEmail, removeParticipant, useExtractedItems, importActionItems, acceptExtractedItem, rejectExtractedItem } from '@/lib/hooks'
-import { SECTIONS } from '@/lib/types'
-import type { ScorecardItem, Issue, Todo, SegueNote, Headline, SectionTimer, ParticipantRole, ExtractedItem } from '@/lib/types'
+import { useAuth, useMeeting, updateSegueNote, upsertSegueNote, updateHeadline, upsertHeadline, upsertScorecardItem, deleteScorecardItem, upsertIssue, deleteIssue, upsertTodo, deleteTodo, updateMeeting, updateSectionTimer, useCommitments, createCommitment, updateCommitment, setCommitmentStatus, describeCommitmentError, addParticipantByEmail, removeParticipant, useExtractedItems, importActionItems, acceptExtractedItem, rejectExtractedItem, useRocks, createRock, setRockCheckin, setRockStatus, deleteRock } from '@/lib/hooks'
+import { SECTIONS, ROCK_STATUS_LABEL } from '@/lib/types'
+import { quarterOf, quarterLabel, selectableQuarters } from '@/lib/quarters'
+import type { ScorecardItem, Issue, Todo, SegueNote, Headline, SectionTimer, ParticipantRole, ExtractedItem, Rock, RockStatus } from '@/lib/types'
 
 type Participant = {
   membershipId: string
@@ -465,10 +466,13 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
                       <label className="text-[11px] font-bold uppercase tracking-wide text-medium-purple mb-2 block">Scorecard Measurables</label>
                       <ScorecardList items={measurables} meetingId={id} type="measurable" onUpdate={refetch} />
                     </div>
-                    <div>
-                      <label className="text-[11px] font-bold uppercase tracking-wide text-medium-purple mb-2 block">Quarterly Rocks</label>
-                      <ScorecardList items={rocks} meetingId={id} type="rock" onUpdate={refetch} />
-                    </div>
+                    <RockList
+                      meetingId={id}
+                      meetingDate={meeting.meeting_date}
+                      participants={participants}
+                      currentUserId={user.id}
+                      legacyRocks={rocks}
+                    />
                   </div>
                 )}
 
@@ -993,6 +997,244 @@ function WeeklyCommitments({ meetingId, participants, currentUserId }: {
           </button>
         </div>
       </div>
+    </div>
+  )
+}
+
+/**
+ * Quarterly Rocks for everyone in this meeting.
+ *
+ * Rocks are read from the rocks table for this meeting's quarter, never copied on
+ * to the agenda. That is what makes them appear in *every* agenda in the quarter,
+ * including one created after a skipped week, and it means editing a Rock is a
+ * single change rather than a dozen rows that drift apart.
+ */
+function RockList({
+  meetingId, meetingDate, participants, currentUserId, legacyRocks,
+}: {
+  meetingId: string
+  meetingDate: string
+  participants: Participant[]
+  currentUserId: string
+  legacyRocks: ScorecardItem[]
+}) {
+  const quarter = quarterOf(meetingDate)
+  const ownerIds = participants.map(p => p.id).filter(Boolean)
+  const { rocks, loading, error, refetch } = useRocks(meetingId, ownerIds, quarter)
+
+  const [title, setTitle] = useState('')
+  const [ownerId, setOwnerId] = useState(currentUserId)
+  const [forQuarter, setForQuarter] = useState(quarter)
+  const [saving, setSaving] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
+
+  const nameFor = (id: string) => {
+    const p = participants.find(x => x.id === id)
+    return p?.full_name || p?.email || 'Unknown'
+  }
+
+  const add = async () => {
+    if (!title.trim() || saving) return
+    setSaving(true)
+    setActionError(null)
+    const { error: createError } = await createRock({
+      owner_id: ownerId,
+      title: title.trim(),
+      quarter: forQuarter,
+      created_by: currentUserId,
+    })
+    if (createError) setActionError(createError)
+    else {
+      setTitle('')
+      await refetch()
+    }
+    setSaving(false)
+  }
+
+  const pulse = async (rock: Rock, onTrack: boolean) => {
+    setActionError(null)
+    const { error: checkinError } = await setRockCheckin({
+      rock_id: rock.id,
+      meeting_id: meetingId,
+      on_track: onTrack,
+      recorded_by: currentUserId,
+    })
+    if (checkinError) setActionError(checkinError)
+    await refetch()
+  }
+
+  const changeStatus = async (rock: Rock, status: RockStatus) => {
+    setActionError(null)
+    const { error: statusError } = await setRockStatus(rock.id, status)
+    if (statusError) setActionError(statusError)
+    await refetch()
+  }
+
+  const remove = async (rock: Rock) => {
+    setActionError(null)
+    const { error: deleteError } = await deleteRock(rock.id)
+    if (deleteError) setActionError(deleteError)
+    await refetch()
+  }
+
+  const problem = actionError || error
+  const byOwner = ownerIds
+    .map(id => ({ id, rocks: rocks.filter(r => r.owner_id === id) }))
+    .filter(group => group.rocks.length > 0)
+
+  return (
+    <div>
+      <div className="flex items-baseline justify-between mb-2">
+        <label className="text-[11px] font-bold uppercase tracking-wide text-medium-purple">
+          Quarterly Rocks
+        </label>
+        <span className="text-[11px] text-gray">{quarterLabel(quarter)}</span>
+      </div>
+
+      {problem && (
+        <div className="bg-red-light text-coral-red text-sm p-3 rounded-lg mb-3">{problem}</div>
+      )}
+
+      {legacyRocks.length > 0 && (
+        <div className="bg-amber-light text-[#e67e22] text-xs p-3 rounded-lg mb-3">
+          {legacyRocks.length} Rock{legacyRocks.length === 1 ? '' : 's'} on this agenda predate
+          quarterly Rocks and are shown below. Re-add them above to have them carry across the
+          whole quarter.
+        </div>
+      )}
+
+      {loading ? (
+        <p className="text-sm text-gray mb-3">Loading Rocks...</p>
+      ) : byOwner.length === 0 ? (
+        <p className="text-sm text-gray mb-3">
+          No Rocks for {quarterLabel(quarter)} yet. A Rock added here shows up in every agenda for
+          that person this quarter.
+        </p>
+      ) : (
+        <div className="space-y-3 mb-4">
+          {byOwner.map(group => (
+            <div key={group.id}>
+              <div className="text-[11px] font-bold uppercase tracking-wide text-gray mb-1">
+                {nameFor(group.id)}
+              </div>
+              <div className="space-y-2">
+                {group.rocks.map(rock => {
+                  const onTrack = rock.checkin ? rock.checkin.on_track : rock.status !== 'off_track'
+                  const closed = rock.status === 'done' || rock.status === 'dropped'
+                  return (
+                    <div
+                      key={rock.id}
+                      className={`flex items-center gap-3 p-3 border rounded-lg ${
+                        closed
+                          ? 'border-light-gray bg-[#fafafa]'
+                          : onTrack
+                            ? 'border-light-gray bg-white'
+                            : 'border-coral-red bg-red-light'
+                      }`}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className={`font-semibold text-sm ${closed ? 'line-through text-gray' : 'text-near-black'}`}>
+                          {rock.title}
+                        </div>
+                        <div className="text-xs text-gray">
+                          {ROCK_STATUS_LABEL[rock.status]}
+                          {!rock.checkin && !closed && ' · no pulse this week yet'}
+                        </div>
+                      </div>
+
+                      {!closed && (
+                        <div className="flex gap-1 flex-shrink-0">
+                          {/* This week's pulse, recorded per meeting so the trend
+                              across the quarter survives rather than one flag. */}
+                          <button
+                            onClick={() => pulse(rock, true)}
+                            className={`text-[10px] font-bold px-2 py-1 rounded border transition ${
+                              rock.checkin && onTrack
+                                ? 'bg-green border-green text-white'
+                                : 'border-light-gray text-gray hover:border-green'
+                            }`}
+                          >
+                            ON TRACK
+                          </button>
+                          <button
+                            onClick={() => pulse(rock, false)}
+                            className={`text-[10px] font-bold px-2 py-1 rounded border transition ${
+                              rock.checkin && !onTrack
+                                ? 'bg-coral-red border-coral-red text-white'
+                                : 'border-light-gray text-gray hover:border-coral-red'
+                            }`}
+                          >
+                            OFF
+                          </button>
+                        </div>
+                      )}
+
+                      <select
+                        value={rock.status}
+                        onChange={e => changeStatus(rock, e.target.value as RockStatus)}
+                        className="border border-light-gray rounded px-2 py-1 text-xs focus:border-steel-blue focus:outline-none flex-shrink-0"
+                      >
+                        {(['on_track', 'off_track', 'done', 'dropped'] as RockStatus[]).map(st => (
+                          <option key={st} value={st}>{ROCK_STATUS_LABEL[st]}</option>
+                        ))}
+                      </select>
+
+                      <button
+                        onClick={() => remove(rock)}
+                        title="Remove this Rock"
+                        className="text-gray hover:text-coral-red transition text-sm flex-shrink-0"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="flex gap-2 items-end flex-wrap">
+        <input
+          value={title}
+          onChange={e => setTitle(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') add() }}
+          placeholder="Rock for the quarter..."
+          className="flex-1 min-w-[180px] border border-light-gray rounded-lg px-3 py-2 text-sm focus:border-steel-blue focus:outline-none"
+        />
+        <select
+          value={ownerId}
+          onChange={e => setOwnerId(e.target.value)}
+          className="border border-light-gray rounded-lg px-2 py-2 text-sm focus:border-steel-blue focus:outline-none"
+        >
+          {participants.map(p => (
+            <option key={p.id} value={p.id}>{p.full_name || p.email}</option>
+          ))}
+        </select>
+        <select
+          value={forQuarter}
+          onChange={e => setForQuarter(e.target.value)}
+          className="border border-light-gray rounded-lg px-2 py-2 text-sm focus:border-steel-blue focus:outline-none"
+        >
+          {selectableQuarters(meetingDate).map(q => (
+            <option key={q} value={q}>{quarterLabel(q)}</option>
+          ))}
+        </select>
+        <button
+          onClick={add}
+          disabled={saving || !title.trim()}
+          className="bg-medium-purple text-white font-semibold px-4 py-2 rounded-lg text-sm hover:bg-deep-purple transition disabled:opacity-50"
+        >
+          {saving ? 'Adding...' : 'Add Rock'}
+        </button>
+      </div>
+
+      {legacyRocks.length > 0 && (
+        <div className="mt-3">
+          <ScorecardList items={legacyRocks} meetingId={meetingId} type="rock" onUpdate={refetch} />
+        </div>
+      )}
     </div>
   )
 }

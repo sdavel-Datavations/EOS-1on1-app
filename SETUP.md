@@ -35,6 +35,11 @@
      level deep, enforced by a trigger. A subtask inherits its parent's visibility,
      otherwise a progress count would silently omit rows the reader can't see.
 
+   - `supabase-rocks.sql` — quarterly Rocks. A Rock is stored once against its
+     owner and quarter, and every agenda in that quarter reads it, so nothing is
+     copied and nothing can drift. Adds `rock_checkins` for the weekly on/off-track
+     pulse, which keeps the trend across the quarter rather than one current flag.
+
    Every file is safe to re-run, and they are listed in dependency order.
 3. Go to **Authentication > Providers** and make sure **Email** is enabled
 4. Go to **Settings > API** and copy:
@@ -240,7 +245,13 @@ agenda as a possible duplicate, and marks items where no owner could be read.
 
 **Meeting page (/meeting/[id])** — The 5-section EOS agenda:
 1. **Segue** — Both users prep personal + professional wins independently
-2. **Scorecard & Rock Pulse** — On/off track toggles (measurable names carry forward)
+2. **Scorecard & Rock Pulse** — Weekly measurables (names carry forward), plus
+   **quarterly Rocks**. A Rock belongs to a person and a quarter, not to one
+   agenda: add it once and it appears in every 1-on-1 for that person until the
+   quarter ends, including a meeting created after a skipped week. Each week takes
+   an on/off-track pulse, recorded per meeting so the trend survives. Editing or
+   closing a Rock is limited to its owner, their manager, and an admin — a
+   departmental colleague can see it but not rewrite it.
 3. **Headlines** — Both users write their own headlines, see each other's
 4. **IDS Issues** — Priority cycling (H/M/L), descriptions + resolutions
 5. **To-Dos & Wrap** — Incomplete to-dos auto-carry from last meeting. Meeting rating 1-10.

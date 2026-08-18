@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { createClient } from './supabase'
 import { findExactDuplicate, type ExistingItem } from './dedupe'
 import { parseActionItems, resolveOwner } from './parse-action-items'
-import type { Meeting, SegueNote, ScorecardItem, Headline, Issue, Todo, SectionTimer, Profile, Commitment, TrackedCommitment, Teammate, MeetingParticipant, ParticipantRole, ExtractedItem } from './types'
+import type { Rock, RockCheckin, RockStatus, Meeting, SegueNote, ScorecardItem, Headline, Issue, Todo, SectionTimer, Profile, Commitment, TrackedCommitment, Teammate, MeetingParticipant, ParticipantRole, ExtractedItem } from './types'
 
 function getSupabase() {
   return createClient()
@@ -272,10 +272,14 @@ export async function createMeeting(managerId: string, reportId: string | null, 
 
   // Seed default scorecard items from previous meeting (carry names forward)
   if (prevMeeting) {
+    // Measurables only. Rocks used to be copied forward here too, which is what
+    // made one Rock become a dozen drifting rows; they now live in the rocks table
+    // against their owner and quarter, and every agenda reads them directly.
     const { data: prevScorecard } = await sb
       .from('scorecard_items')
       .select('*')
       .eq('meeting_id', prevMeeting.id)
+      .eq('item_type', 'measurable')
       .order('sort_order')
 
     if (prevScorecard?.length) {
@@ -910,4 +914,146 @@ export async function searchPastMeetings(query: string) {
     .limit(20)
 
   return { issues: issueResults || [], todos: todoResults || [] }
+}
+
+// ── Rocks ──
+/**
+ * Every Rock belonging to this meeting's participants, for this meeting's quarter,
+ * with this meeting's check-in attached.
+ *
+ * Read rather than copied. The previous approach duplicated Rocks onto each new
+ * meeting, so one Rock became a dozen rows that drifted apart and disappeared
+ * entirely if a week was skipped. Here a Rock exists once, and every agenda in the
+ * quarter simply reads it.
+ */
+export function useRocks(meetingId: string, ownerIds: string[], quarter: string) {
+  const [rocks, setRocks] = useState<Rock[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  // Stable dependency: a fresh array each render would refetch forever.
+  const ownerKey = [...ownerIds].sort().join(',')
+
+  const fetchRocks = useCallback(async () => {
+    if (!meetingId || !quarter || !ownerKey) {
+      setRocks([])
+      setLoading(false)
+      return
+    }
+    const owners = ownerKey.split(',')
+    const sb = getSupabase()
+
+    const { data, error: rockError } = await sb
+      .from('rocks')
+      .select('*, owner:profiles!rocks_owner_id_fkey(id, full_name, email)')
+      .in('owner_id', owners)
+      .eq('quarter', quarter)
+      .order('sort_order')
+      .order('created_at')
+
+    if (rockError) {
+      setError(describeRockError(rockError))
+      setRocks([])
+      setLoading(false)
+      return
+    }
+
+    const rows = (data as unknown as Rock[]) || []
+    if (rows.length > 0) {
+      const { data: checkins } = await sb
+        .from('rock_checkins')
+        .select('*')
+        .eq('meeting_id', meetingId)
+        .in('rock_id', rows.map(r => r.id))
+
+      const byRock = new Map((checkins || []).map(c => [c.rock_id as string, c as RockCheckin]))
+      for (const rock of rows) rock.checkin = byRock.get(rock.id) ?? null
+    }
+
+    setError(null)
+    setRocks(rows)
+    setLoading(false)
+  }, [meetingId, quarter, ownerKey])
+
+  useEffect(() => { fetchRocks() }, [fetchRocks])
+
+  return { rocks, loading, error, refetch: fetchRocks }
+}
+
+export function describeRockError(error: { code?: string; message: string }) {
+  if (error.code === 'PGRST205' || /rocks/i.test(error.message)) {
+    return 'Rocks table not found — run supabase-rocks.sql in the Supabase SQL editor.'
+  }
+  return error.message
+}
+
+export async function createRock(item: {
+  owner_id: string
+  title: string
+  quarter: string
+  created_by: string
+  description?: string
+}) {
+  const { data, error } = await getSupabase()
+    .from('rocks')
+    .insert({
+      owner_id: item.owner_id,
+      title: item.title,
+      quarter: item.quarter,
+      created_by: item.created_by,
+      description: item.description || '',
+    })
+    .select()
+    .single()
+
+  if (error) return { data: null, error: describeRockError(error) }
+  return { data, error: null }
+}
+
+export async function updateRock(id: string, fields: Partial<Pick<Rock, 'title' | 'description' | 'status' | 'quarter' | 'sort_order'>>) {
+  // .select() so an RLS refusal surfaces rather than reporting success with zero
+  // rows — editing a Rock is limited to its owner, their manager, and an admin.
+  const { data, error } = await getSupabase().from('rocks').update(fields).eq('id', id).select('id')
+  if (error) return { error: describeRockError(error) }
+  if (!data || data.length === 0) {
+    return { error: 'That change did not save — only the owner, their manager, or an admin can edit a Rock.' }
+  }
+  return { error: null }
+}
+
+export async function deleteRock(id: string) {
+  const { data, error } = await getSupabase().from('rocks').delete().eq('id', id).select('id')
+  if (error) return { error: describeRockError(error) }
+  if (!data || data.length === 0) {
+    return { error: 'Nothing was deleted — only the owner, their manager, or an admin can remove a Rock.' }
+  }
+  return { error: null }
+}
+
+/** This meeting's pulse on a Rock. Upserted, so toggling repeatedly is one row. */
+export async function setRockCheckin(args: {
+  rock_id: string
+  meeting_id: string
+  on_track: boolean
+  recorded_by: string
+  note?: string
+}) {
+  const { error } = await getSupabase()
+    .from('rock_checkins')
+    .upsert(
+      {
+        rock_id: args.rock_id,
+        meeting_id: args.meeting_id,
+        on_track: args.on_track,
+        note: args.note || '',
+        recorded_by: args.recorded_by,
+      },
+      { onConflict: 'rock_id,meeting_id' },
+    )
+  if (error) return { error: describeRockError(error) }
+  return { error: null }
+}
+
+export async function setRockStatus(id: string, status: RockStatus) {
+  return updateRock(id, { status })
 }
