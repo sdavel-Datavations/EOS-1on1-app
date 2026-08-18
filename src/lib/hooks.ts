@@ -584,6 +584,31 @@ export async function notifyCommitment(id: string): Promise<{ error: string | nu
   }
 }
 
+/**
+ * Resolves an email to an account, for handing a task to someone who isn't on
+ * any of your meetings yet.
+ *
+ * The owner dropdown lists only people you share a meeting with, which is the
+ * common case but excludes a teammate you've simply never had a 1-on-1 with.
+ * They still need an account: there is nobody to notify otherwise.
+ */
+export async function findProfileByEmail(
+  email: string,
+): Promise<{ id?: string; fullName?: string; error?: string }> {
+  const cleaned = email.trim().toLowerCase()
+  if (!cleaned) return { error: 'Enter an email address.' }
+
+  const { data, error } = await getSupabase()
+    .from('profiles')
+    .select('id, full_name')
+    .eq('email', cleaned)
+    .maybeSingle()
+
+  if (error) return { error: error.message }
+  if (!data) return { error: `No account for ${cleaned} — they need to sign up first.` }
+  return { id: data.id as string, fullName: (data.full_name as string) || undefined }
+}
+
 /** People who share at least one meeting with this user — the plausible assignees. */
 export function useTeammates(userId: string | undefined) {
   const [teammates, setTeammates] = useState<Teammate[]>([])

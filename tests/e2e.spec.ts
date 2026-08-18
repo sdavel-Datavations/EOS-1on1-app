@@ -318,3 +318,50 @@ test('pasted action items land in the review queue, deduped', async ({ page }) =
   await page.getByRole('button', { name: 'Accept' }).first().click()
   await expect(page.getByText(/Pending review \(2\)/)).toBeVisible({ timeout: 15000 })
 })
+
+test('a task can be assigned to a teammate by email and reaches them', async ({ page, browser }) => {
+  test.skip(
+    !(await trackerReady()),
+    'completed_at column missing — run supabase-weekly-tracker.sql in the Supabase SQL editor',
+  )
+
+  // A teammate who shares no meeting with the assigner, so the owner dropdown
+  // cannot list them — the case assignment by email exists for.
+  const mateEmail = `mate+${Date.now()}@example.com`
+  const matePassword = 'Password123!'
+  await createUser(mateEmail, matePassword, 'Team Mate')
+
+  const ownerEmail = `owner+${Date.now()}@example.com`
+  await seedAndLogin(page, ownerEmail, 'Password123!', 'Task Owner')
+  await page.goto('/tasks')
+
+  await page.getByPlaceholder('What needs doing?').fill('Review the vendor contract')
+  await page.getByPlaceholder('teammate@datavations.com').fill(mateEmail)
+  await page.getByRole('button', { name: /Add & Notify/ }).click()
+
+  // Named in the confirmation, so it's clear who it was for — and when no channel
+  // is configured the UI says the send failed rather than implying it went out.
+  await expect(page.getByText(/Task added.*Team Mate/)).toBeVisible({ timeout: 20000 })
+  await expect(page.getByText('Review the vendor contract')).toBeVisible()
+
+  // An unknown address is refused rather than silently assigned to nobody
+  await page.getByPlaceholder('What needs doing?').fill('Should not be created')
+  await page.getByPlaceholder('teammate@datavations.com').fill('nobody@example.com')
+  await page.getByRole('button', { name: /Add & Notify/ }).click()
+  await expect(page.getByText(/No account for nobody@example.com/)).toBeVisible({ timeout: 10000 })
+  await expect(page.getByText('Should not be created')).toHaveCount(0)
+
+  // The assignee sees it on their own board — this is the RLS path for a task
+  // with no meeting behind it, reachable only via assignee_id.
+  const mateContext = await browser.newContext()
+  const matePage = await mateContext.newPage()
+  await login(matePage, mateEmail, matePassword)
+  await matePage.goto('/tasks')
+  await expect(matePage.getByText('Review the vendor contract')).toBeVisible({ timeout: 15000 })
+  await expect(matePage.getByRole('button', { name: 'Mine to do' })).toBeVisible()
+
+  // And they can close it, which is what the Slack reply does server-side
+  await matePage.getByTitle('Mark as done').first().click()
+  await expect(matePage.getByText(/Done this week · 1/)).toBeVisible({ timeout: 15000 })
+  await mateContext.close()
+})

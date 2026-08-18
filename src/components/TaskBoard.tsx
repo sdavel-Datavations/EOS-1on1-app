@@ -6,6 +6,7 @@ import {
   useMyCommitments,
   useTeammates,
   createStandaloneCommitment,
+  findProfileByEmail,
   setCommitmentStatus,
   notifyCommitment,
   describeCommitmentError,
@@ -35,6 +36,7 @@ export default function TaskBoard({ userId, userName }: { userId: string; userNa
   const [title, setTitle] = useState('')
   const [dueDate, setDueDate] = useState('')
   const [assigneeId, setAssigneeId] = useState(userId)
+  const [assigneeEmail, setAssigneeEmail] = useState('')
   const [notifySlack, setNotifySlack] = useState(true)
   const [notifyEmail, setNotifyEmail] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -66,9 +68,24 @@ export default function TaskBoard({ userId, userName }: { userId: string; userNa
     setSaveError(null)
     setNotice(null)
 
+    // An email takes precedence over the dropdown: it's the escape hatch for a
+    // teammate who isn't on any of your meetings, so the dropdown can't list them.
+    let targetId = assigneeId
+    let targetLabel = nameFor(assigneeId)
+    if (assigneeEmail.trim()) {
+      const { id, fullName, error: lookupError } = await findProfileByEmail(assigneeEmail)
+      if (!id) {
+        setSaveError(lookupError || 'Could not find that person.')
+        setSaving(false)
+        return
+      }
+      targetId = id
+      targetLabel = fullName || assigneeEmail.trim()
+    }
+
     const { data, error: createError } = await createStandaloneCommitment({
       creator_id: userId,
-      assignee_id: assigneeId,
+      assignee_id: targetId,
       title: title.trim(),
       due_date: dueDate || null,
       notify_slack: notifySlack,
@@ -83,6 +100,7 @@ export default function TaskBoard({ userId, userName }: { userId: string; userNa
 
     setTitle('')
     setDueDate('')
+    setAssigneeEmail('')
     await refetch()
 
     // Tell them now, not on tomorrow's cron run. This is also what creates the
@@ -90,15 +108,17 @@ export default function TaskBoard({ userId, userName }: { userId: string; userNa
     // path simply isn't available for this task.
     if (notifySlack || notifyEmail) {
       const { error: notifyError } = await notifyCommitment(data.id)
+      // Name the assignee either way: knowing the task was created but the DM
+      // failed is only useful if you also know who was meant to get it.
+      const who = targetId === userId ? 'you' : targetLabel
       setNotice(
         notifyError
-          ? `Task added, but not sent: ${notifyError}`
-          : assigneeId === userId
-            ? 'Task added and sent to you.'
-            : `Task added and sent to ${nameFor(assigneeId)}.`,
+          ? `Task added for ${who}, but not sent: ${notifyError}`
+          : `Task added and sent to ${who}.`,
       )
     } else {
-      setNotice('Task added. Nobody was notified.')
+      const who = targetId === userId ? 'you' : targetLabel
+      setNotice(`Task added for ${who}. Nobody was notified.`)
     }
     setSaving(false)
   }
@@ -167,13 +187,26 @@ export default function TaskBoard({ userId, userName }: { userId: string; userNa
             <select
               value={assigneeId}
               onChange={e => setAssigneeId(e.target.value)}
-              className="border border-light-gray rounded-lg px-3 py-2 text-sm focus:border-steel-blue focus:outline-none"
+              disabled={assigneeEmail.trim().length > 0}
+              className="border border-light-gray rounded-lg px-3 py-2 text-sm focus:border-steel-blue focus:outline-none disabled:opacity-50"
             >
               <option value={userId}>{userName || 'Me'}</option>
               {teammates.map(t => (
                 <option key={t.id} value={t.id}>{t.full_name || t.email}</option>
               ))}
             </select>
+          </div>
+          <div>
+            <label className="text-[11px] font-bold uppercase tracking-wide text-gray block mb-1">
+              Or by email
+            </label>
+            <input
+              type="email"
+              value={assigneeEmail}
+              onChange={e => { setAssigneeEmail(e.target.value); setSaveError(null) }}
+              placeholder="teammate@datavations.com"
+              className="border border-light-gray rounded-lg px-3 py-2 text-sm w-52 focus:border-steel-blue focus:outline-none"
+            />
           </div>
           <button
             onClick={add}

@@ -148,7 +148,8 @@ https://your-app.vercel.app/**
 **Tasks (/tasks)** — The day-to-day board, separate from the agenda because work
 that comes up mid-week has nothing to do with any particular 1-on-1.
 
-Add a task, assign it to anyone you share a meeting with, give it a due date, and
+Add a task, assign it to a teammate — from the dropdown if you share a meeting
+with them, or by email for anyone else with an account — give it a due date, and
 the owner is notified **immediately** rather than on the next nightly run — which
 matters because the Slack DM is also what makes closing it by replying "done"
 possible at all. Commitments raised in a 1-on-1 appear on the same board, so
