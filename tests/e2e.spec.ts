@@ -605,6 +605,12 @@ test('a main task holds subtasks and reports progress', async ({ page }) => {
   await expect(page.getByText('Draft the member onboarding copy')).toHaveCount(1)
 })
 
+/** Opens To-Dos & Wrap, where the Open Work review lives. Sections start collapsed. */
+async function openToDos(page: Page) {
+  await page.getByText('To-Dos & Wrap').click()
+  await expect(page.getByTestId('open-work')).toBeVisible({ timeout: 10000 })
+}
+
 test('open work from elsewhere lands on the agenda, and closing it there closes the task', async ({ page }) => {
   test.skip(
     !(await trackerReady()),
@@ -627,6 +633,9 @@ test('open work from elsewhere lands on the agenda, and closing it there closes 
   await expect(page).toHaveURL(/.*\/meeting\/.+/)
   const firstMeeting = page.url()
   const panel = page.getByTestId('open-work')
+  // It lives in To-Dos & Wrap, which is collapsed until opened — that section is
+  // the EOS to-do review, so outstanding work is the first thing in it.
+  await openToDos(page)
   await expect(panel.getByText('Chase the vendor invoice')).toBeVisible({ timeout: 15000 })
   await expect(panel.getByText('Raised during the week · 1')).toBeVisible()
 
@@ -636,6 +645,7 @@ test('open work from elsewhere lands on the agenda, and closing it there closes 
   await page.getByRole('button', { name: 'Add Commitment' }).click()
   await expect(page.getByText('Send the Q3 scorecard')).toBeVisible({ timeout: 10000 })
   await page.reload()
+  await openToDos(page)
   await expect(panel.getByText('Chase the vendor invoice')).toBeVisible({ timeout: 15000 })
   await expect(panel.getByText('Send the Q3 scorecard')).toHaveCount(0)
 
@@ -644,6 +654,7 @@ test('open work from elsewhere lands on the agenda, and closing it there closes 
   await page.getByRole('button', { name: 'Start 1-on-1' }).click()
   await expect(page).toHaveURL(/.*\/meeting\/.+/)
   expect(page.url()).not.toBe(firstMeeting)
+  await openToDos(page)
   await expect(panel.getByText('Send the Q3 scorecard')).toBeVisible({ timeout: 15000 })
   await expect(panel.getByText('Chase the vendor invoice')).toBeVisible()
   await expect(panel.getByText('Carried over from earlier 1-on-1s · 1')).toBeVisible()

@@ -343,9 +343,6 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
             {participantsError} Showing the manager and report only until then.
           </div>
         )}
-        {/* Still-open work from elsewhere, so nothing has to be remembered to get raised */}
-        <OpenWorkPanel meetingId={id} participants={participants} />
-
         {/* Action items from the notetaker → review queue */}
         <div className="bg-white rounded-xl border border-light-gray p-6">
           <h2 className="text-lg font-bold text-deep-purple mb-2">Import Next Steps</h2>
@@ -532,6 +529,7 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
                     <p className="text-sm text-gray font-condensed leading-relaxed">
                       Review last week&apos;s to-dos: done or not done. Confirm new to-dos from today.
                     </p>
+                    <OpenWorkPanel meetingId={id} participants={participants} />
                     {carriedTodos.length > 0 && (
                       <div>
                         <label className="text-[11px] font-bold uppercase tracking-wide text-medium-purple mb-2 block">Carried Forward</label>
@@ -882,10 +880,12 @@ function ActionItemImport({ meetingId, meetingDate, participants, currentUserId,
  * Everything the people in this meeting still owe from elsewhere: tasks raised
  * mid-week, and commitments from earlier 1-on-1s that never got closed.
  *
- * The whole point is that nothing has to be remembered or re-entered to get
- * discussed — if it is open anywhere, it is on the agenda. Rows are read from the
- * task list rather than copied on to it, the same rule Rocks follow, so ticking
- * one off closes the actual task in the one place it exists.
+ * Lives in To-Dos & Wrap, because that is what this is: the EOS to-do review,
+ * widened to everything outstanding rather than only the rows someone remembered
+ * to type on to an agenda. Being inside the section puts it on the 5-minute clock.
+ *
+ * Rows are read from the task list rather than copied on to it, the same rule
+ * Rocks follow, so ticking one off closes the actual task where it really lives.
  */
 function OpenWorkPanel({ meetingId, participants }: {
   meetingId: string, participants: Participant[]
@@ -936,9 +936,11 @@ function OpenWorkPanel({ meetingId, participants }: {
   const problem = closeError || error
 
   return (
-    <div data-testid="open-work" className="bg-white rounded-xl border border-light-gray p-6">
-      <div className="flex items-baseline justify-between mb-2">
-        <h2 className="text-lg font-bold text-deep-purple">Open Work</h2>
+    <div data-testid="open-work">
+      <div className="flex items-baseline justify-between mb-1">
+        <label className="text-[11px] font-bold uppercase tracking-wide text-medium-purple">
+          Open Work
+        </label>
         {work.count > 0 && (
           <span className="text-[11px] text-gray">
             {work.count} open
@@ -948,13 +950,13 @@ function OpenWorkPanel({ meetingId, participants }: {
           </span>
         )}
       </div>
-      <p className="text-sm text-gray mb-4">
-        Anything these people still owe, wherever it was raised. Ticking one off closes the real
-        task — here, on the tasks page, and in Slack.
+      <p className="text-xs text-gray mb-3">
+        Still owed from anywhere else — mid-week tasks and commitments from earlier 1-on-1s.
+        Ticking one off closes the real task, here and in Slack.
       </p>
 
       {problem && (
-        <div className="bg-red-light text-coral-red text-sm p-3 rounded-lg mb-4">{problem}</div>
+        <div className="bg-red-light text-coral-red text-sm p-3 rounded-lg mb-3">{problem}</div>
       )}
 
       {loading ? (

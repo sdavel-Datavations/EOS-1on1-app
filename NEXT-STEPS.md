@@ -78,8 +78,9 @@ There is no Anthropic key and no LLM dependency.
 - `weekly_commitments` holds **both** mid-week tasks (`meeting_id` null) and 1-on-1
   commitments. Departmental sharing and subtasks apply to standalone tasks only — 1-on-1
   commitments can be performance material.
-- **Open Work** at the top of each agenda reads every still-open task belonging to the
-  people in that meeting — mid-week tasks and unfinished commitments from earlier 1-on-1s —
+- **Open Work** lives inside **To-Dos & Wrap** (section 5), which is the EOS to-do review —
+  so it is on that section's 5-minute clock and collapsed until the section is opened. It
+  reads every still-open task belonging to the people in that meeting — mid-week tasks and unfinished commitments from earlier 1-on-1s —
   and deliberately excludes that meeting's own commitments, which have their own section.
   Read, never copied: a copy would fork the task, so closing one side would leave the other
   open. `src/lib/open-work.ts` holds the pure logic; `useOpenWork` does the query.
