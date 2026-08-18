@@ -68,24 +68,16 @@ export async function POST(req: Request) {
     })
   }
 
+  // completeTask rewrites the Slack message itself via chat.update, so every
+  // surface that can close a task leaves the message in the same state — the app,
+  // an emailed link, a reply here, or this button.
   const result = await completeTask(sb, task, profile.id, 'slack_button')
   if (!result.ok) {
     return NextResponse.json({ response_type: 'ephemeral', text: `Couldn't close that: ${result.error}` })
   }
 
-  // replace_original rewrites the message in place, so the button can't be
-  // pressed again and the message reflects reality.
-  return NextResponse.json({
-    replace_original: true,
-    text: `✅ ${task.title}`,
-    blocks: [
-      {
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: `✅ *${task.title}*\nClosed by <@${slackUserId}>${result.alreadyDone ? ' (was already done)' : ''}`,
-        },
-      },
-    ],
-  })
+  // A bare 200. Returning a message body does not replace the original for
+  // block_actions — that is the slash-command contract, and assuming it applied
+  // here is why pressing the button left a live button behind.
+  return new Response(null, { status: 200 })
 }

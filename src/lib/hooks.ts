@@ -494,6 +494,20 @@ export async function createStandaloneCommitment(item: {
  * Toggle done/open. Stamps completed_at in the same write so the tracker can
  * report what got finished this week — a status column alone can't say when.
  */
+/**
+ * Best-effort redraw of the task's Slack message after a status change.
+ *
+ * Fire-and-forget: the task is already updated, and Slack being briefly stale is
+ * better than blocking the checkbox on a network round trip.
+ */
+function syncSlackMessage(id: string) {
+  void fetch('/api/slack/sync', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ commitment_id: id }),
+  }).catch(() => {})
+}
+
 export async function setCommitmentStatus(id: string, status: 'open' | 'done') {
   const result = await updateCommitment(id, {
     status,
@@ -503,8 +517,12 @@ export async function setCommitmentStatus(id: string, status: 'open' | 'done') {
   // Ticking a box off is more important than recording when, so fall back to
   // the status alone rather than failing the whole write.
   if (result.error && isMissingColumn(result.error, 'completed_at')) {
-    return updateCommitment(id, { status })
+    const fallback = await updateCommitment(id, { status })
+    if (!fallback.error) syncSlackMessage(id)
+    return fallback
   }
+  // Slack has to agree with the app, or somebody presses a dead button.
+  if (!result.error) syncSlackMessage(id)
   return result
 }
 

@@ -1,4 +1,5 @@
 import { createClient as createServiceClient, type SupabaseClient } from '@supabase/supabase-js'
+import { updateMessage, closedBlocks, reopenedBlocks, slackConfigured } from './slack'
 
 /**
  * Closing a task from outside the app.
@@ -124,6 +125,63 @@ export async function profileForSlackUser(
   return profile as { id: string; full_name: string | null }
 }
 
+
+/**
+ * Brings the Slack message in line with the task.
+ *
+ * Called after every state change, from whichever surface made it, so the app and
+ * Slack cannot disagree. Without this a task closed in the web app leaves a live
+ * "Mark done" button sitting in Slack, and somebody presses it repeatedly
+ * wondering why nothing happens.
+ *
+ * Never throws and never blocks the caller's result: the task is already closed
+ * in the database, and failing to redraw a message must not undo that.
+ */
+export async function syncSlackMessage(sb: SupabaseClient, taskId: string): Promise<void> {
+  if (!slackConfigured()) return
+
+  try {
+    const { data } = await sb
+      .from('weekly_commitments')
+      .select('id, title, status, slack_channel, slack_ts, completed_via, completer:profiles!weekly_commitments_completed_by_fkey(full_name)')
+      .eq('id', taskId)
+      .maybeSingle()
+
+    if (!data?.slack_channel || !data?.slack_ts) return
+
+    const embedded = (data as { completer?: { full_name: string | null } | { full_name: string | null }[] | null }).completer
+    const completer = Array.isArray(embedded) ? embedded[0] : embedded
+
+    const message =
+      data.status === 'done'
+        ? closedBlocks({
+            title: data.title as string,
+            byName: completer?.full_name ?? null,
+            via: (data.completed_via as string) ?? null,
+          })
+        : reopenedBlocks({ title: data.title as string, commitmentId: data.id as string })
+
+    const { error } = await updateMessage({
+      channel: data.slack_channel as string,
+      ts: data.slack_ts as string,
+      text: message.text,
+      blocks: message.blocks,
+    })
+
+    if (error) {
+      await logNotification(sb, {
+        commitment_id: taskId,
+        channel: 'slack',
+        event: 'error',
+        status: 'failed',
+        detail: `chat.update: ${error}`,
+      })
+    }
+  } catch {
+    // Redrawing a message is never worth failing a request over.
+  }
+}
+
 export type CompleteResult =
   | { ok: true; alreadyDone: boolean; title: string }
   | { ok: false; error: string }
@@ -212,6 +270,9 @@ export async function completeTask(
     status: 'ok',
     detail: alreadyDone ? `already closed (via ${via})` : `closed via ${via}`,
   })
+
+  // One place for this, so all four surfaces leave Slack in the same state.
+  await syncSlackMessage(sb, task.id)
 
   return { ok: true, alreadyDone, title: task.title }
 }

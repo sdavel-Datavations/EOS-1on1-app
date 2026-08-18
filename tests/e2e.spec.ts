@@ -526,3 +526,29 @@ test('a department sees each others shared tasks but not private 1-on-1 commitme
   await expect(carolPage.getByText('Refresh the campaign landing page')).toHaveCount(0)
   await carolCtx.close()
 })
+
+test('the slack sync endpoint refuses callers without access', async ({ page, request }) => {
+  // It reaches Slack with the service role, so the caller's authority is
+  // established first through their own client — RLS decides, not the handler.
+  const anon = await request.post(`${baseUrl()}/api/slack/sync`, {
+    data: { commitment_id: '00000000-0000-0000-0000-000000000000' },
+  })
+  expect(anon.status()).toBe(401)
+
+  const email = `sync+${Date.now()}@example.com`
+  await seedAndLogin(page, email, 'Password123!', 'Sync Tester')
+  const cookies = await page.context().cookies()
+
+  const foreign = await request.post(`${baseUrl()}/api/slack/sync`, {
+    headers: { cookie: cookies.map(c => `${c.name}=${c.value}`).join('; ') },
+    data: { commitment_id: '00000000-0000-0000-0000-000000000000' },
+  })
+  expect(foreign.status()).toBe(403)
+  expect((await foreign.json()).error).toContain('No access')
+
+  const missing = await request.post(`${baseUrl()}/api/slack/sync`, {
+    headers: { cookie: cookies.map(c => `${c.name}=${c.value}`).join('; ') },
+    data: {},
+  })
+  expect(missing.status()).toBe(400)
+})

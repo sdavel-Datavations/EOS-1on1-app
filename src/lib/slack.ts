@@ -151,3 +151,75 @@ export function taskBlocks(args: {
 export function escapeMrkdwn(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
+
+/**
+ * Rewrites a message already sent. Requires chat:write, and only works on a
+ * message this bot posted.
+ *
+ * This is what keeps Slack and the app from disagreeing: a task closed anywhere —
+ * the web app, an emailed link, a reply, the button — leaves a Slack message
+ * still showing a live "Mark done" button unless the message itself is rewritten.
+ */
+export async function updateMessage(args: {
+  channel: string
+  ts: string
+  text: string
+  blocks?: unknown[]
+}): Promise<{ error?: string }> {
+  const json = await call<Record<string, never>>('chat.update', args)
+  return json.ok ? {} : { error: json.error || 'chat.update failed' }
+}
+
+/** The closed state: no button, and a record of who closed it and how. */
+export function closedBlocks(args: {
+  title: string
+  byName?: string | null
+  via?: string | null
+}): { text: string; blocks: unknown[] } {
+  const how: Record<string, string> = {
+    app: 'in the app',
+    slack_reply: 'by replying here',
+    slack_button: 'from this message',
+    email_link: 'from the email link',
+  }
+  const detail = [args.byName ? `Closed by ${args.byName}` : 'Closed', args.via ? how[args.via] || args.via : '']
+    .filter(Boolean)
+    .join(' ')
+
+  return {
+    text: `✅ ${args.title}`,
+    blocks: [
+      {
+        type: 'section',
+        text: { type: 'mrkdwn', text: `✅ ~${escapeMrkdwn(args.title)}~` },
+      },
+      { type: 'context', elements: [{ type: 'mrkdwn', text: detail }] },
+    ],
+  }
+}
+
+/** Reopened in the app: the button comes back, because it works again. */
+export function reopenedBlocks(args: { title: string; commitmentId: string }): {
+  text: string
+  blocks: unknown[]
+} {
+  return {
+    text: args.title,
+    blocks: [
+      { type: 'section', text: { type: 'mrkdwn', text: `*${escapeMrkdwn(args.title)}*\nReopened` } },
+      {
+        type: 'actions',
+        elements: [
+          {
+            type: 'button',
+            action_id: 'mark_done',
+            style: 'primary',
+            text: { type: 'plain_text', text: 'Mark done' },
+            value: args.commitmentId,
+          },
+        ],
+      },
+      { type: 'context', elements: [{ type: 'mrkdwn', text: '_Or just reply “done” in this thread._' }] },
+    ],
+  }
+}
