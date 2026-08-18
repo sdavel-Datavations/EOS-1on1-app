@@ -103,9 +103,10 @@ export interface Commitment {
   completed_by?: string | null
   completed_via?: string | null
 
-  // Added by supabase-departments.sql.
+  // Added by supabase-departments.sql. The department is stamped by a trigger
+  // from the creator's profile; false keeps the task out of that shared view.
   department?: string | null
-  visible_to_department?: boolean | null
+  visible_to_department?: boolean
 }
 
 /** A commitment with the date of the meeting it came from, for the tracker. */
@@ -184,6 +185,7 @@ export interface Invitation {
   email: string
   manager_id: string | null
   access_level: 'member' | 'manager' | 'admin'
+  department: string | null
   invited_by: string | null
   accepted_at: string | null
   created_at: string

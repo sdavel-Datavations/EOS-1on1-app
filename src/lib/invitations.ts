@@ -54,6 +54,7 @@ export async function upsertInvitation(
       manager_id: row.manager_id,
     }
     if (row.department !== undefined) fields.department = row.department
+    if (row.department !== undefined) fields.department = row.department
     if (row.invited_by !== undefined) fields.invited_by = row.invited_by
     // ilike with no wildcards is case-insensitive equality, which matches the
     // index and also catches rows the backfill inserted with original casing.
