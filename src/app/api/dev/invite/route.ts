@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { blockedInProduction } from '@/lib/dev-only'
+import { upsertInvitation } from '@/lib/invitations'
 
 /**
  * Dev-only: records an invitation so a test account can be created.
@@ -26,10 +27,11 @@ export async function POST(req: Request) {
   if (!email) return NextResponse.json({ error: 'email is required' }, { status: 400 })
 
   const sb = createClient(url, service, { auth: { persistSession: false } })
-  const { error } = await sb.from('invitations').upsert(
-    { email: email.trim().toLowerCase(), access_level: role || 'member', manager_id: managerId ?? null },
-    { onConflict: 'email' },
-  )
+  const { error } = await upsertInvitation(sb, {
+    email,
+    access_level: role || 'member',
+    manager_id: managerId ?? null,
+  })
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ ok: true })

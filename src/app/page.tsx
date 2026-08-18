@@ -7,6 +7,19 @@ import { useState } from 'react'
 import Link from 'next/link'
 import type { Meeting } from '@/lib/types'
 
+/**
+ * Signup is gated on an invitation by a trigger on auth.users, but GoTrue
+ * replaces a trigger's message with a generic "Database error creating new
+ * user" — so the real reason never reaches the browser. Rather than show that,
+ * name the only thing that trigger rejects.
+ */
+function describeSignUpError(message: string): string {
+  if (/database error|unexpected_failure/i.test(message)) {
+    return 'Could not create that account. Signup is invite-only — ask an admin to invite your email address, then try again.'
+  }
+  return message
+}
+
 export default function Home() {
   const { user, loading: authLoading, signIn, signUp, signOut } = useAuth()
   const { meetings, loading: meetingsLoading, refetch } = useMeetings(user?.id)
@@ -97,7 +110,7 @@ export default function Home() {
                     const res = await signUp(email, password, fullName)
                     // eslint-disable-next-line no-console
                     console.log('signUp response', { status: res?.error ? 'error' : 'ok', error: res?.error?.message })
-                    if (res?.error) setError(res.error.message)
+                    if (res?.error) setError(describeSignUpError(res.error.message))
                   }
                 } catch (err) {
                   // eslint-disable-next-line no-console

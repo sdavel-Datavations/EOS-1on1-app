@@ -144,7 +144,9 @@ create table if not exists public.invitations (
   created_at timestamptz default now()
 );
 
--- Case-insensitive, because email is matched that way at signup.
+-- Case-insensitive, because email is matched that way at signup. Note this is an
+-- EXPRESSION index: `ON CONFLICT (email)` will not match it, so the invite routes
+-- insert and fall back to an update on unique violation rather than upserting.
 create unique index if not exists invitations_email_idx on public.invitations(lower(email));
 
 alter table public.invitations enable row level security;

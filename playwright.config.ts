@@ -2,6 +2,9 @@ import { defineConfig, devices } from '@playwright/test'
 
 export default defineConfig({
   testDir: 'tests',
+  // Removes the accounts each run creates. SKIP_TEST_CLEANUP=1 to keep them for
+  // debugging a failure.
+  globalTeardown: './tests/global-teardown.ts',
   timeout: 30_000,
   expect: { timeout: 5000 },
   fullyParallel: false,

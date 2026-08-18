@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { requireCaller } from '@/lib/require-admin'
 import { logNotification } from '@/lib/complete-task'
+import { upsertInvitation } from '@/lib/invitations'
 
 /**
  * Invites someone, optionally under a manager.
@@ -53,14 +54,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'role must be member, manager or admin' }, { status: 400 })
   }
 
-  const { data, error } = await caller.admin
-    .from('invitations')
-    .upsert(
-      { email, manager_id: managerId, access_level: role, invited_by: caller.id },
-      { onConflict: 'email' },
-    )
-    .select('id, email, access_level, manager_id, accepted_at')
-    .maybeSingle()
+  const { data, error } = await upsertInvitation(caller.admin, {
+    email,
+    manager_id: managerId,
+    access_level: role,
+    invited_by: caller.id,
+  })
 
   if (error) {
     if (error.code === 'PGRST205') {

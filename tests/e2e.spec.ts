@@ -381,13 +381,16 @@ test('signup requires an invitation', async () => {
   let failed = false
   try {
     await createUser(stranger, 'Password123!', 'Uninvited Stranger')
-  } catch (err) {
+  } catch {
+    // The wording is deliberately not asserted: GoTrue replaces a trigger's
+    // message with a generic "Database error creating new user", so the outcome
+    // is the only thing worth checking here.
     failed = true
-    expect(String(err)).toMatch(/not been invited/i)
   }
   expect(failed, 'an uninvited email was allowed to create an account').toBe(true)
 
-  // Invited, and the same call now succeeds
+  // Invited, and the same call now succeeds — proving the gate is the invitation
+  // and not something incidental about the address.
   await invite(stranger)
   await createUser(stranger, 'Password123!', 'Now Invited')
 })
