@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { bucketFor, endOfWeek, daysUntil, describeDue, groupByDue, completedThisWeek, todayISO } from '../src/lib/tracker'
+import { bucketFor, endOfWeek, daysUntil, describeDue, groupByDue, completedThisWeek, completedBuckets, startOfWeek, todayISO } from '../src/lib/tracker'
 
 // 2026-08-17 is a Monday, so the week runs Mon 17th → Sun 23rd.
 const MONDAY = '2026-08-17'
@@ -133,5 +133,57 @@ test.describe('todayISO', () => {
   test('formats the local date, zero padded', () => {
     expect(todayISO(new Date(2026, 0, 5, 23, 30))).toBe('2026-01-05')
     expect(todayISO(new Date(2026, 11, 31, 0, 1))).toBe('2026-12-31')
+  })
+})
+
+test.describe('completedBuckets', () => {
+  // 2026-08-19 is a Wednesday; that week starts Monday 2026-08-17.
+  const REF = '2026-08-19'
+  const items = [
+    { id: 'today', completed_at: '2026-08-19T09:00:00Z' },
+    { id: 'monday', completed_at: '2026-08-17T09:00:00Z' },
+    { id: 'earlier-month', completed_at: '2026-08-04T09:00:00Z' },
+    { id: 'month-first', completed_at: '2026-08-01T00:00:00Z' },
+    { id: 'earlier-year', completed_at: '2026-03-15T09:00:00Z' },
+    { id: 'year-first', completed_at: '2026-01-01T00:00:00Z' },
+    { id: 'last-year', completed_at: '2025-12-31T23:00:00Z' },
+    { id: 'no-timestamp', completed_at: null },
+  ]
+
+  test('files each item into exactly one range', () => {
+    const g = completedBuckets(items, REF)
+    expect(g.week.map(i => i.id)).toEqual(['today', 'monday'])
+    expect(g.month.map(i => i.id)).toEqual(['earlier-month', 'month-first'])
+    expect(g.year.map(i => i.id)).toEqual(['earlier-year', 'year-first'])
+    // A row closed before completed_at existed is kept, not dropped — losing it
+    // would look like work that never happened.
+    expect(g.older.map(i => i.id).sort()).toEqual(['last-year', 'no-timestamp'])
+
+    const total = Object.values(g).reduce((n, b) => n + b.length, 0)
+    expect(total).toBe(items.length)
+  })
+
+  test('ranges do not overlap, so a total across sections is a real total', () => {
+    const g = completedBuckets(items, REF)
+    const ids = Object.values(g).flat().map(i => i.id)
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  test('newest first within each range', () => {
+    const g = completedBuckets(items, REF)
+    expect(g.week[0].id).toBe('today')
+    expect(g.month[0].id).toBe('earlier-month')
+  })
+
+  test('boundaries are inclusive at the start of week, month and year', () => {
+    expect(completedBuckets([{ completed_at: '2026-08-17T00:00:00Z' }], REF).week).toHaveLength(1)
+    expect(completedBuckets([{ completed_at: '2026-08-01T00:00:00Z' }], REF).month).toHaveLength(1)
+    expect(completedBuckets([{ completed_at: '2026-01-01T00:00:00Z' }], REF).year).toHaveLength(1)
+  })
+
+  test('startOfWeek counts back to Monday, including from a Sunday', () => {
+    expect(startOfWeek('2026-08-19')).toBe('2026-08-17') // Wednesday
+    expect(startOfWeek('2026-08-17')).toBe('2026-08-17') // Monday itself
+    expect(startOfWeek('2026-08-23')).toBe('2026-08-17') // Sunday, back six days
   })
 })

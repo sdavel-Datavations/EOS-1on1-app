@@ -7,9 +7,9 @@
    - `supabase-schema.sql` — core tables, RLS policies, and the new-user trigger
    - `supabase-commitments.sql` — the `weekly_commitments` table behind the Weekly
      Commitments panel. Until this runs, that panel shows a "table not found" notice.
-   - `supabase-participants.sql` — the `meeting_participants` table, plus the policies
-     that grant meeting access by membership rather than by manager/report only.
-     Until this runs, anyone added as a third participant cannot open the meeting.
+   - `supabase-participants.sql` — the `meeting_participants` table, plus policies
+     granting meeting access by membership rather than manager/report only. Until
+     this runs, a third participant cannot open the meeting.
    - `supabase-transcripts.sql` — the `extracted_items` review queue behind
      "Import Next Steps". Needs the access function from `supabase-participants.sql`.
    - `supabase-delete-meetings.sql` — lets the organiser delete a meeting, and
@@ -35,7 +35,7 @@
      level deep, enforced by a trigger. A subtask inherits its parent's visibility,
      otherwise a progress count would silently omit rows the reader can't see.
 
-   Every file is safe to re-run, and each is listed in dependency order.
+   Every file is safe to re-run, and they are listed in dependency order.
 3. Go to **Authentication > Providers** and make sure **Email** is enabled
 4. Go to **Settings > API** and copy:
    - **Project URL** (e.g. `https://abcdef.supabase.co`)

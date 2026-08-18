@@ -11,7 +11,8 @@ import {
   notifyCommitment,
   describeCommitmentError,
 } from '@/lib/hooks'
-import { groupByDue, describeDue, completedThisWeek, todayISO } from '@/lib/tracker'
+import { groupByDue, describeDue, completedBuckets, DONE_BUCKET_LABEL, DONE_BUCKET_ORDER, todayISO } from '@/lib/tracker'
+import type { DoneBucket } from '@/lib/tracker'
 import { BUCKET_ORDER, BUCKET_LABEL, COMPLETED_VIA_LABEL } from '@/lib/types'
 import type { TrackedCommitment, DueBucket, TaskFilter } from '@/lib/types'
 
@@ -55,6 +56,7 @@ export default function TaskBoard({
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [subtaskFor, setSubtaskFor] = useState<string | null>(null)
   const [subtaskTitle, setSubtaskTitle] = useState('')
+  const [openDone, setOpenDone] = useState<Set<DoneBucket>>(new Set(['week']))
 
   const today = todayISO()
 
@@ -86,7 +88,7 @@ export default function TaskBoard({
   const topLevel = visible.filter(c => !c.parent_id)
 
   const open = topLevel.filter(c => c.status === 'open')
-  const done = completedThisWeek(topLevel.filter(c => c.status === 'done'), today)
+  const doneGroups = completedBuckets(topLevel.filter(c => c.status === 'done'), today)
   const groups = groupByDue(open, today)
 
   const nameFor = (id: string | null) => {
@@ -186,6 +188,14 @@ export default function TaskBoard({
     }
     setBusyId(null)
   }
+
+  const toggleDone = (bucket: DoneBucket) =>
+    setOpenDone(prev => {
+      const next = new Set(prev)
+      if (next.has(bucket)) next.delete(bucket)
+      else next.add(bucket)
+      return next
+    })
 
   const toggleExpanded = (id: string) =>
     setExpanded(prev => {
@@ -378,28 +388,49 @@ export default function TaskBoard({
         </div>
       )}
 
-      {done.length > 0 && (
-        <div className="mt-6 pt-4 border-t border-light-gray">
-          <div className="text-[11px] font-bold uppercase tracking-wide text-green mb-2">
-            Done this week · {done.length}
-          </div>
-          <div className="space-y-2">
-            {done.map(c => (
-              <Row
-                key={c.id}
-                c={c}
-                today={today}
-                nameFor={nameFor}
-                busy={busyId === c.id}
-                notificationsReady={notificationsReady}
-                userId={userId}
-                onToggle={() => toggle(c)}
-                onResend={() => resend(c)}
-              />
-            ))}
-          </div>
+      {DONE_BUCKET_ORDER.some(b => doneGroups[b].length > 0) && (
+        <div className="mt-6 pt-4 border-t border-light-gray space-y-3">
+          {DONE_BUCKET_ORDER.filter(b => doneGroups[b].length > 0).map(bucket => (
+            <div key={bucket}>
+              <button
+                onClick={() => toggleDone(bucket)}
+                className="text-[11px] font-bold uppercase tracking-wide text-green hover:text-[#2d8a47] transition"
+              >
+                {openDone.has(bucket) ? '▾' : '▸'} {DONE_BUCKET_LABEL[bucket]} · {doneGroups[bucket].length}
+              </button>
+              {openDone.has(bucket) && (
+                <div className="space-y-2 mt-2">
+                  {doneGroups[bucket].map(c => (
+                    <TaskGroup
+                      key={c.id}
+                      c={c}
+                      userId={userId}
+                      subtasks={subtasksOf.get(c.id) || []}
+                      today={today}
+                      nameFor={nameFor}
+                      busyId={busyId}
+                      notificationsReady={notificationsReady}
+                      expanded={expanded.has(c.id)}
+                      onExpand={() => toggleExpanded(c.id)}
+                      onToggle={toggle}
+                      onResend={resend}
+                      subtaskOpen={subtaskFor === c.id}
+                      onSubtaskOpen={() => {
+                        setSubtaskFor(subtaskFor === c.id ? null : c.id)
+                        setSubtaskTitle('')
+                      }}
+                      subtaskTitle={subtaskTitle}
+                      onSubtaskTitle={setSubtaskTitle}
+                      onSubtaskAdd={() => addSubtask(c)}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       )}
+
     </div>
   )
 }
@@ -425,12 +456,19 @@ function Row({
   const canEdit = c.assignee_id === userId || c.creator_id === userId
   const completer = (c as TrackedCommitment & { completer?: { full_name: string | null } | null }).completer
 
+  // An overdue task reads red at the row level, not just in its date text: the
+  // date is the smallest thing on the row and easy to skim past.
+  const base = 'flex items-center gap-3 p-3'
+  const surface = overdue
+    ? 'bg-red-light border-coral-red'
+    : 'bg-white border-light-gray'
+
   return (
     <div
       className={
         flat
-          ? 'flex items-center gap-3 p-3'
-          : 'flex items-center gap-3 p-3 bg-white border border-light-gray rounded-lg'
+          ? `${base} ${overdue ? 'border-l-4 border-coral-red bg-red-light rounded-r-lg' : ''}`
+          : `${base} border rounded-lg ${surface}${overdue ? ' border-l-4' : ''}`
       }
     >
       {canEdit ? (
@@ -456,9 +494,18 @@ function Row({
       )}
 
       <div className="flex-1 min-w-0">
-        <div className={`font-semibold text-sm ${isDone ? 'line-through text-gray' : 'text-near-black'}`}>
+        <div
+          className={`font-semibold text-sm ${
+            isDone ? 'line-through text-gray' : overdue ? 'text-coral-red' : 'text-near-black'
+          }`}
+        >
           {c.title}
           {/* Somebody else's task you can see because you share a department. */}
+          {overdue && (
+            <span className="ml-2 text-[10px] font-bold px-1.5 py-0.5 rounded bg-coral-red text-white align-middle">
+              MISSED
+            </span>
+          )}
           {c.assignee_id !== userId && c.visible_to_department && c.department && (
             <span className="ml-2 text-[10px] font-bold px-1.5 py-0.5 rounded bg-[#e8f0fe] text-steel-blue align-middle">
               {c.department.toUpperCase()}
@@ -553,7 +600,13 @@ function TaskGroup({
   const isOpen = expanded || overdue > 0
 
   return (
-    <div className={total > 0 ? 'border border-light-gray rounded-lg bg-white' : ''}>
+    <div
+      className={
+        total > 0
+          ? `border rounded-lg ${overdue > 0 ? 'border-coral-red bg-red-light' : 'border-light-gray bg-white'}`
+          : ''
+      }
+    >
       <Row
         c={c}
         today={today}

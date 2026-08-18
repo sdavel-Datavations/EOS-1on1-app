@@ -232,6 +232,11 @@ export async function completeTask(
 
   // Idempotent: Slack retries deliveries, and email links get clicked twice.
   if (task.status === 'done') {
+    // Still redraw. This is precisely the case where Slack is out of date — the
+    // task was closed elsewhere, or closed before this sync existed — so pressing
+    // the button again is how someone tries to fix a message that looks wrong.
+    // Returning here without redrawing meant a stale message could never heal.
+    await syncSlackMessage(sb, task.id)
     return { ok: true, alreadyDone: true, title: task.title }
   }
 

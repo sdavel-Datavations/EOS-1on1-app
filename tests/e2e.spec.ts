@@ -546,6 +546,8 @@ test('the slack sync endpoint refuses callers without access', async ({ page, re
   expect(foreign.status()).toBe(403)
   expect((await foreign.json()).error).toContain('No access')
 
+  // Signed in but no id: 400. Unauthenticated it is 401 above, because auth comes
+  // first — a stranger shouldn't learn which field the route wants.
   const missing = await request.post(`${baseUrl()}/api/slack/sync`, {
     headers: { cookie: cookies.map(c => `${c.name}=${c.value}`).join('; ') },
     data: {},
@@ -577,8 +579,9 @@ test('a main task holds subtasks and reports progress', async ({ page }) => {
   await expect(page.getByText('Draft the member onboarding copy')).toBeVisible({ timeout: 15000 })
   await expect(page.getByRole('button', { name: /0 of 1 done/ })).toBeVisible()
 
-  // A second subtask, then closing one moves the count rather than a stored tally
-  await page.getByRole('button', { name: '+ Subtask' }).first().click()
+  // The form stays open after adding, so several subtasks can go in without
+  // reopening it each time — no second '+ Subtask' click needed here.
+  await expect(subInput).toBeVisible()
   await subInput.fill('Wire the entitlement check')
   await page.getByRole('button', { name: 'Add', exact: true }).click()
   await expect(page.getByRole('button', { name: /0 of 2 done/ })).toBeVisible({ timeout: 15000 })
@@ -593,6 +596,11 @@ test('a main task holds subtasks and reports progress', async ({ page }) => {
   await page.reload()
   await expect(page.getByRole('button', { name: /1 of 2 done/ })).toBeVisible({ timeout: 15000 })
 
-  // Subtasks are not also listed as their own top-level rows
+  // Collapsed after a reload, so the subtask is legitimately not rendered — which
+  // is itself the proof it is not also a top-level row.
+  await expect(page.getByText('Draft the member onboarding copy')).toHaveCount(0)
+
+  // Expanding shows it exactly once, not twice
+  await page.getByRole('button', { name: /1 of 2 done/ }).click()
   await expect(page.getByText('Draft the member onboarding copy')).toHaveCount(1)
 })

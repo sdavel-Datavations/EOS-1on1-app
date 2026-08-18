@@ -15,16 +15,18 @@ import { tryServiceClient, syncSlackMessage } from '@/lib/complete-task'
  * handler.
  */
 export async function POST(req: Request) {
+  // Authenticate first: an anonymous caller should learn nothing about this
+  // route's shape, not even which field it wants.
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Not signed in' }, { status: 401 })
+
   const { commitment_id: commitmentId } = (await req.json().catch(() => ({}))) as {
     commitment_id?: string
   }
   if (!commitmentId) {
     return NextResponse.json({ error: 'commitment_id is required' }, { status: 400 })
   }
-
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Not signed in' }, { status: 401 })
 
   const { data: visible } = await supabase
     .from('weekly_commitments')
