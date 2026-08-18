@@ -90,12 +90,30 @@ export interface Commitment {
   notified: boolean
   completed_at: string | null
   created_at: string
+
+  // Added by supabase-notifications.sql, so optional: the app degrades to a
+  // working task list with the notification UI hidden until that migration runs.
+  notified_at?: string | null
+  slack_channel?: string | null
+  slack_ts?: string | null
+  completed_by?: string | null
+  completed_via?: string | null
 }
 
 /** A commitment with the date of the meeting it came from, for the tracker. */
 export type TrackedCommitment = Commitment & {
   meeting: { meeting_date: string } | null
 }
+
+/** How a task was closed, for the audit line on the task board. */
+export const COMPLETED_VIA_LABEL: Record<string, string> = {
+  app: 'in the app',
+  slack_reply: 'by Slack reply',
+  slack_button: 'by Slack button',
+  email_link: 'from the email link',
+}
+
+export type TaskFilter = 'all' | 'mine' | 'assigned_by_me'
 
 export type DueBucket = 'overdue' | 'today' | 'this_week' | 'later' | 'no_date'
 

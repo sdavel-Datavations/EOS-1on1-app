@@ -155,7 +155,7 @@ test('weekly commitments save through RLS', async ({ page }) => {
   await expect(page.getByTitle('Mark as open')).toBeVisible({ timeout: 10000 })
 })
 
-test('the tracker holds mid-week tasks and commitments from meetings alike', async ({ page }) => {
+test('the tasks page holds mid-week tasks and commitments from meetings alike', async ({ page }) => {
   test.skip(
     !(await trackerReady()),
     'completed_at column missing — run supabase-weekly-tracker.sql in the Supabase SQL editor',
@@ -163,15 +163,18 @@ test('the tracker holds mid-week tasks and commitments from meetings alike', asy
 
   const email = `tracker+${Date.now()}@example.com`
   await seedAndLogin(page, email, 'Password123!', 'Tracker Tester')
-  await expect(page.getByRole('heading', { name: 'My Week' })).toBeVisible({ timeout: 10000 })
 
-  // A task typed straight into the tracker has no meeting behind it at all —
-  // the case the original RLS policy silently rejected, since it keyed off
+  // Tasks live on their own page now; the dashboard only links to them.
+  await expect(page.getByRole('heading', { name: 'Tasks' })).toBeVisible({ timeout: 10000 })
+  await page.getByRole('link', { name: /Tasks/ }).first().click()
+  await expect(page).toHaveURL(/\/tasks$/)
+
+  // A task typed straight in has no meeting behind it at all — the case the
+  // original RLS policy silently rejected, since it keyed off
   // can_access_meeting(meeting_id) and meeting_id is null here.
-  await page.getByPlaceholder('Add a task for this week').fill('Chase the vendor invoice')
-  await page.getByRole('button', { name: 'Add Task' }).click()
-  await expect(page.getByText('Chase the vendor invoice')).toBeVisible({ timeout: 10000 })
-  await expect(page.getByText('You · No due date')).toBeVisible()
+  await page.getByPlaceholder('What needs doing?').fill('Chase the vendor invoice')
+  await page.getByRole('button', { name: /Add & Notify/ }).click()
+  await expect(page.getByText('Chase the vendor invoice')).toBeVisible({ timeout: 15000 })
 
   // It survives a reload, so it really persisted rather than only rendering
   await page.reload()
@@ -179,26 +182,49 @@ test('the tracker holds mid-week tasks and commitments from meetings alike', asy
 
   // A commitment raised inside a 1-on-1 must show up in the same list, because
   // the whole point is not having to reopen last week's meeting to find it
+  await page.goto('/')
   await page.getByRole('button', { name: 'Start 1-on-1' }).click()
   await expect(page).toHaveURL(/.*\/meeting\/.+/)
   await page.getByPlaceholder('Commitment title').fill('Send the Q3 scorecard')
   await page.getByRole('button', { name: 'Add Commitment' }).click()
   await expect(page.getByText('Send the Q3 scorecard')).toBeVisible({ timeout: 10000 })
 
-  await page.goto('/')
-  const fromMeeting = page.getByText('Send the Q3 scorecard')
-  await expect(fromMeeting).toBeVisible({ timeout: 10000 })
+  await page.goto('/tasks')
+  await expect(page.getByText('Send the Q3 scorecard')).toBeVisible({ timeout: 10000 })
   await expect(page.getByText('Chase the vendor invoice')).toBeVisible()
 
-  // Ticking it off moves it out of the open list and into "done this week"
+  // Filters narrow without losing anything: both are mine to do here
+  await page.getByRole('button', { name: 'I asked for' }).click()
+  await expect(page.getByText('Nothing open here.')).toBeVisible()
+  await page.getByRole('button', { name: 'Mine to do' }).click()
+  await expect(page.getByText('Chase the vendor invoice')).toBeVisible()
+
+  // Ticking it off moves it into "done this week"
   await page.getByTitle('Mark as done').first().click()
-  await expect(page.getByRole('button', { name: /Done this week/ })).toBeVisible({ timeout: 10000 })
+  await expect(page.getByText(/Done this week · 1/)).toBeVisible({ timeout: 10000 })
 
   await page.reload()
-  const doneToggle = page.getByRole('button', { name: /Done this week · 1/ })
-  await expect(doneToggle).toBeVisible({ timeout: 10000 })
-  await doneToggle.click()
-  await expect(page.getByText('Done', { exact: true })).toBeVisible()
+  await expect(page.getByText(/Done this week · 1/)).toBeVisible({ timeout: 10000 })
+})
+
+test('the tasks page is not readable without a session', async ({ page }) => {
+  await page.goto('/tasks')
+  await expect(page.getByText('You need to be signed in to see your tasks.')).toBeVisible({ timeout: 10000 })
+})
+
+test('notifying a task you cannot see is refused', async ({ page, request }) => {
+  // /api/notify sends with the service role, so the caller's authority is checked
+  // first — through their own client, which means RLS decides, not the handler.
+  const email = `notifyauth+${Date.now()}@example.com`
+  await seedAndLogin(page, email, 'Password123!', 'Notify Tester')
+  const cookies = await page.context().cookies()
+
+  const res = await request.post(`${baseUrl()}/api/notify`, {
+    headers: { cookie: cookies.map(c => `${c.name}=${c.value}`).join('; ') },
+    data: { commitment_id: '00000000-0000-0000-0000-000000000000' },
+  })
+  expect(res.status()).toBe(403)
+  expect((await res.json()).error).toContain('No access')
 })
 
 test('slack webhooks reject unsigned requests', async ({ request }) => {

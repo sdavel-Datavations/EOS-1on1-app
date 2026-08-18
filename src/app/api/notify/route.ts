@@ -57,8 +57,17 @@ export async function GET(req: Request) {
   return run()
 }
 
-/** Manual "send now": a signed-in user, or the cron secret. */
+/**
+ * Manual "send now": a signed-in user, or the cron secret.
+ *
+ * Accepts an optional { commitment_id } to send just that one task immediately —
+ * a task handed to someone mid-week is useless if they hear about it tomorrow,
+ * and the Slack message is also what makes "reply done" possible at all.
+ */
 export async function POST(req: Request) {
+  const body = (await req.json().catch(() => ({}))) as { commitment_id?: string }
+  const commitmentId = body.commitment_id
+
   if (!hasCronSecret(req)) {
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
@@ -68,11 +77,26 @@ export async function POST(req: Request) {
         { status: 401 },
       )
     }
+
+    // The send itself runs with the service role, so the caller's authority has
+    // to be established first. This read goes through the caller's own client,
+    // which means RLS — not this handler — decides whether they may see the task.
+    if (commitmentId) {
+      const { data: visible } = await supabase
+        .from('weekly_commitments')
+        .select('id')
+        .eq('id', commitmentId)
+        .maybeSingle()
+      if (!visible) {
+        return NextResponse.json({ error: 'No access to that task' }, { status: 403 })
+      }
+    }
   }
-  return run()
+
+  return run(commitmentId)
 }
 
-async function run() {
+async function run(commitmentId?: string) {
 
   const slackOn = slackConfigured()
   const mailOn = mailConfigured()
@@ -90,18 +114,24 @@ async function run() {
 
   // Service role, because cron has no session. Scoped tightly: open, not yet
   // notified, and actually due soon — never a blanket read of the table.
-  const { data, error } = await sb
-    .from('weekly_commitments')
-    .select(
-      'id, title, due_date, assignee_id, creator_id, meeting_id, notify_slack, notify_email,' +
-        ' meeting:meetings(meeting_date),' +
-        ' assignee:profiles!weekly_commitments_assignee_id_fkey(id, full_name, email, slack_user_id),' +
-        ' creator:profiles!weekly_commitments_creator_id_fkey(full_name)',
-    )
-    .eq('status', 'open')
-    .is('notified_at', null)
-    .or(`due_date.is.null,due_date.lte.${horizon}`)
-    .limit(50)
+  const COLUMNS =
+    'id, title, due_date, assignee_id, creator_id, meeting_id, notify_slack, notify_email,' +
+    ' meeting:meetings(meeting_date),' +
+    ' assignee:profiles!weekly_commitments_assignee_id_fkey(id, full_name, email, slack_user_id),' +
+    ' creator:profiles!weekly_commitments_creator_id_fkey(full_name)'
+
+  let query = sb.from('weekly_commitments').select(COLUMNS).eq('status', 'open')
+
+  if (commitmentId) {
+    // An explicit request skips both the horizon and the already-notified filter:
+    // the user asked for this task, now. Re-sending replaces slack_ts, so replies
+    // land on the newest message rather than a stale thread.
+    query = query.eq('id', commitmentId)
+  } else {
+    query = query.is('notified_at', null).or(`due_date.is.null,due_date.lte.${horizon}`).limit(50)
+  }
+
+  const { data, error } = await query
 
   if (error) {
     return NextResponse.json({ error: `Could not read tasks: ${error.message}` }, { status: 500 })

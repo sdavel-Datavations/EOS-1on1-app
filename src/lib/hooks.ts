@@ -448,12 +448,21 @@ export async function createCommitment(item: {
     .single()
 }
 
-/** A task added mid-week, belonging to no meeting. */
+/**
+ * A task added mid-week, belonging to no meeting.
+ *
+ * notify_slack defaults to TRUE here, unlike a commitment raised in a meeting.
+ * Closing a task by replying "done" only works if a Slack message exists to reply
+ * to — with this off, the whole reply path is silently unavailable for exactly
+ * the tasks most likely to want it.
+ */
 export async function createStandaloneCommitment(item: {
   creator_id: string
   assignee_id: string
   title: string
   due_date?: string | null
+  notify_email?: boolean
+  notify_slack?: boolean
 }) {
   return getSupabase()
     .from('weekly_commitments')
@@ -464,8 +473,8 @@ export async function createStandaloneCommitment(item: {
       title: item.title,
       description: '',
       due_date: item.due_date || null,
-      notify_email: true,
-      notify_slack: false,
+      notify_email: item.notify_email ?? true,
+      notify_slack: item.notify_slack ?? true,
     })
     .select()
     .single()
@@ -505,24 +514,74 @@ export function useMyCommitments(userId: string | undefined) {
   const [commitments, setCommitments] = useState<TrackedCommitment[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // False until supabase-notifications.sql runs. The board still works; the
+  // notify controls and the "closed via" line are hidden.
+  const [notificationsReady, setNotificationsReady] = useState(true)
 
   const fetchMine = useCallback(async () => {
     if (!userId) return
-    const { data, error } = await getSupabase()
-      .from('weekly_commitments')
-      .select('*, meeting:meetings(meeting_date)')
-      // Assigned to me, or assigned by me to someone else — a manager needs to
-      // see what he's waiting on, not just what he owes.
-      .or(`assignee_id.eq.${userId},creator_id.eq.${userId}`)
-      .order('due_date', { ascending: true, nullsFirst: false })
+    const sb = getSupabase()
+
+    // Assigned to me, or assigned by me to someone else — a manager needs to see
+    // what he's waiting on, not just what he owes.
+    const mine = `assignee_id.eq.${userId},creator_id.eq.${userId}`
+    const run = (columns: string) =>
+      sb
+        .from('weekly_commitments')
+        .select(columns)
+        .or(mine)
+        .order('due_date', { ascending: true, nullsFirst: false })
+
+    const BASE = '*, meeting:meetings(meeting_date)'
+    const WITH_NOTIFICATIONS = `${BASE}, completer:profiles!weekly_commitments_completed_by_fkey(full_name)`
+
+    let { data, error } = await run(WITH_NOTIFICATIONS)
+
+    // The embed fails outright when completed_by doesn't exist yet, which is a
+    // pending migration rather than a real error.
+    if (error && /completed_by|does not exist|could not find/i.test(error.message)) {
+      setNotificationsReady(false)
+      ;({ data, error } = await run(BASE))
+    } else if (!error) {
+      setNotificationsReady(true)
+    }
+
     setError(error ? describeCommitmentError(error) : null)
-    setCommitments((data as TrackedCommitment[]) || [])
+    setCommitments((data as unknown as TrackedCommitment[]) || [])
     setLoading(false)
   }, [userId])
 
   useEffect(() => { fetchMine() }, [fetchMine])
 
-  return { commitments, loading, error, refetch: fetchMine }
+  return { commitments, loading, error, notificationsReady, refetch: fetchMine }
+}
+
+/**
+ * Sends this task's notification now, rather than waiting for the nightly run.
+ *
+ * A task raised mid-week and handed to someone is useless if they hear about it
+ * tomorrow — and the Slack message is also what makes "reply done" possible at
+ * all, since a threaded reply is matched back to the task by its message id.
+ */
+export async function notifyCommitment(id: string): Promise<{ error: string | null; sent?: boolean }> {
+  try {
+    const res = await fetch('/api/notify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ commitment_id: id }),
+    })
+    const json = await res.json()
+    if (!res.ok) return { error: json.error || 'Could not send the notification' }
+    const outcome = json.results?.[0]
+    const sent = outcome?.slack === 'sent' || outcome?.email === 'sent'
+    if (!sent) {
+      const why = [outcome?.slack, outcome?.email].filter(Boolean).join('; ')
+      return { error: why || 'Nothing was sent — no channel is configured for this task.' }
+    }
+    return { error: null, sent: true }
+  } catch {
+    return { error: 'Could not reach the notification service.' }
+  }
 }
 
 /** People who share at least one meeting with this user — the plausible assignees. */

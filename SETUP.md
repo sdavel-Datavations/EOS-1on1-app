@@ -141,10 +141,20 @@ https://your-app.vercel.app/**
 
 **Dashboard (/)** — Sign in, create new meetings, search past discussions, see meeting history.
 
-**My Week (on the dashboard)** — The day-to-day tracker. Every commitment assigned
-to you or by you, across all meetings, grouped Overdue / Due today / Due this week /
-Later / No due date. Add a task that came up mid-week and it lives here with no
-meeting attached. Ticking one off records when, so "Done this week" is a real list.
+**Tasks (/tasks)** — The day-to-day board, separate from the agenda because work
+that comes up mid-week has nothing to do with any particular 1-on-1.
+
+Add a task, assign it to anyone you share a meeting with, give it a due date, and
+the owner is notified **immediately** rather than on the next nightly run — which
+matters because the Slack DM is also what makes closing it by replying "done"
+possible at all. Commitments raised in a 1-on-1 appear on the same board, so
+nothing has to be hunted for inside last week's meeting.
+
+Grouped Overdue / Due today / Due this week / Later / No due date, filterable by
+Everything / Mine to do / I asked for. Each row shows whether a notification went
+out, with a resend, and once closed, how — "closed by Slack reply", "closed by
+Slack button", "closed from the email link" — and by whom. The dashboard keeps
+only a compact count linking here.
 
 **Import Next Steps (on the meeting page)** — Paste the action-item list Granola,
 Gemini, or Otter already produced at the end of the meeting, one per line. No AI

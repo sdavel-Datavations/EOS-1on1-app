@@ -1,7 +1,7 @@
 'use client'
 
 import { useAuth, useMeetings, createMeeting, deleteMeeting, describeMeetingError } from '@/lib/hooks'
-import MyWeek from '@/components/MyWeek'
+import TaskSummary from '@/components/TaskSummary'
 import { getResolvedSupabaseUrl } from '@/lib/supabase'
 import { useState } from 'react'
 import Link from 'next/link'
@@ -130,7 +130,10 @@ export default function Home() {
       <header className="bg-deep-purple px-6 py-4 flex items-center justify-between sticky top-0 z-50">
         <div className="flex items-center gap-4">
           <span className="text-white font-bold tracking-wider text-lg">DATAVATIONS</span>
-          <span className="text-white/70 text-sm font-light">Weekly 1-on-1 Agenda</span>
+          <nav className="flex items-center gap-3 text-sm">
+            <span className="text-white font-semibold">Agenda</span>
+            <Link href="/tasks" className="text-white/60 hover:text-white transition">Tasks</Link>
+          </nav>
         </div>
         <div className="flex items-center gap-4">
           <span className="text-steel-blue font-semibold text-sm">{user.full_name}</span>
@@ -139,8 +142,8 @@ export default function Home() {
       </header>
 
       <main className="max-w-3xl mx-auto px-4 py-8">
-        {/* Day-to-day tracker: commitments from every meeting, plus mid-week tasks */}
-        <MyWeek userId={user.id} userName={user.full_name} />
+        {/* The board itself lives at /tasks; this is just the way in. */}
+        <TaskSummary userId={user.id} />
 
         {/* New Meeting */}
         <div className="bg-white rounded-xl border border-light-gray p-6 mb-8">
