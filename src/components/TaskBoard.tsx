@@ -27,9 +27,16 @@ const FILTERS: { key: TaskFilter; label: string }[] = [
   { key: 'all', label: 'Everything' },
   { key: 'mine', label: 'Mine to do' },
   { key: 'assigned_by_me', label: 'I asked for' },
+  { key: 'department', label: 'My department' },
 ]
 
-export default function TaskBoard({ userId, userName }: { userId: string; userName: string }) {
+export default function TaskBoard({
+  userId, userName, department,
+}: {
+  userId: string
+  userName: string
+  department?: string | null
+}) {
   const { commitments, loading, error, notificationsReady, refetch } = useMyCommitments(userId)
   const teammates = useTeammates(userId)
 
@@ -39,6 +46,7 @@ export default function TaskBoard({ userId, userName }: { userId: string; userNa
   const [assigneeEmail, setAssigneeEmail] = useState('')
   const [notifySlack, setNotifySlack] = useState(true)
   const [notifyEmail, setNotifyEmail] = useState(true)
+  const [shareWithDept, setShareWithDept] = useState(true)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -50,6 +58,8 @@ export default function TaskBoard({ userId, userName }: { userId: string; userNa
   const visible = commitments.filter(c => {
     if (filter === 'mine') return c.assignee_id === userId
     if (filter === 'assigned_by_me') return c.creator_id === userId && c.assignee_id !== userId
+    // Someone else's work, shared to the department I'm in — the "can I help?" view.
+    if (filter === 'department') return c.assignee_id !== userId && Boolean(c.visible_to_department)
     return true
   })
   const open = visible.filter(c => c.status === 'open')
@@ -90,6 +100,9 @@ export default function TaskBoard({ userId, userName }: { userId: string; userNa
       due_date: dueDate || null,
       notify_slack: notifySlack,
       notify_email: notifyEmail,
+      // Only meaningful for someone who is in a department; otherwise let the
+      // database trigger decide.
+      visible_to_department: department ? shareWithDept : undefined,
     })
 
     if (createError || !data) {
@@ -226,6 +239,16 @@ export default function TaskBoard({ userId, userName }: { userId: string; userNa
             <input type="checkbox" checked={notifyEmail} onChange={e => setNotifyEmail(e.target.checked)} />
             Email
           </label>
+          {department && (
+            <label className="flex items-center gap-1.5 text-xs text-gray cursor-pointer">
+              <input
+                type="checkbox"
+                checked={shareWithDept}
+                onChange={e => setShareWithDept(e.target.checked)}
+              />
+              Visible to {department}
+            </label>
+          )}
         </div>
       </div>
 
@@ -274,6 +297,7 @@ export default function TaskBoard({ userId, userName }: { userId: string; userNa
                     nameFor={nameFor}
                     busy={busyId === c.id}
                     notificationsReady={notificationsReady}
+                    userId={userId}
                     onToggle={() => toggle(c)}
                     onResend={() => resend(c)}
                   />
@@ -298,6 +322,7 @@ export default function TaskBoard({ userId, userName }: { userId: string; userNa
                 nameFor={nameFor}
                 busy={busyId === c.id}
                 notificationsReady={notificationsReady}
+                userId={userId}
                 onToggle={() => toggle(c)}
                 onResend={() => resend(c)}
               />
@@ -310,13 +335,14 @@ export default function TaskBoard({ userId, userName }: { userId: string; userNa
 }
 
 function Row({
-  c, today, nameFor, busy, notificationsReady, onToggle, onResend,
+  c, today, nameFor, busy, notificationsReady, userId, onToggle, onResend,
 }: {
   c: TrackedCommitment
   today: string
   nameFor: (id: string | null) => string
   busy: boolean
   notificationsReady: boolean
+  userId: string
   onToggle: () => void
   onResend: () => void
 }) {
@@ -340,6 +366,12 @@ function Row({
       <div className="flex-1 min-w-0">
         <div className={`font-semibold text-sm ${isDone ? 'line-through text-gray' : 'text-near-black'}`}>
           {c.title}
+          {/* Somebody else's task you can see because you share a department. */}
+          {c.assignee_id !== userId && c.visible_to_department && c.department && (
+            <span className="ml-2 text-[10px] font-bold px-1.5 py-0.5 rounded bg-[#e8f0fe] text-steel-blue align-middle">
+              {c.department.toUpperCase()}
+            </span>
+          )}
         </div>
         <div className="text-xs text-gray">
           {nameFor(c.assignee_id)}

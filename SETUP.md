@@ -25,6 +25,10 @@
    - `supabase-notifications.sql` — where each task's Slack message lives (so a
      threaded "done" reply can be matched back to it), the cached Slack user id,
      and `notification_log`. Until this runs, `/api/notify` fails. Safe to re-run.
+   - `supabase-departments.sql` — departmental visibility: anyone in a department
+     can see that department's shared tasks, read-only. Mid-week tasks default to
+     shared; commitments raised inside a 1-on-1 default to private. Run after
+     `supabase-access-control.sql`. Safe to re-run.
    - `supabase-access-control.sql` — **closes a live leak.** `public.profiles` was
      readable with the anon key and no session, and that key ships in the browser
      bundle, so every name and email address was effectively public. Also makes
@@ -175,8 +179,17 @@ through `/api/team/manager`, which runs with the service role *after* reading th
 caller's own level through their own client. Every change is recorded in
 `notification_log`.
 
-**Manage it at `/team`** — invite with a manager and access level, and change
-reporting lines. Reporting loops are rejected before they're written, since a
+**Departments** are separate from the reporting line. Anyone in a department sees
+that department's shared tasks, so work can be picked up without being handed
+over — read-only, because helping shouldn't mean silently closing someone's task.
+
+A mid-week task defaults to visible to its owner's department. A commitment raised
+**inside a 1-on-1 defaults to private**: a 1-on-1 is a performance conversation,
+and "work on presentation confidence" has no business appearing in front of the
+whole department. Either default is overridable per task.
+
+**Manage it at `/team`** — invite with a manager, access level and department, and
+change reporting lines. Reporting loops are rejected before they're written, since a
 cycle would make the hierarchy walk stop finding people rather than error.
 
 ## 6. Supabase Auth — Redirect URLs

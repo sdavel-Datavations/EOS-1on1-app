@@ -76,12 +76,20 @@ export async function invitationsReady() {
  * leave the gate itself untested. Tolerates the table being absent so the suite
  * passes both before and after that migration.
  */
-export async function invite(email: string, opts: { role?: string; managerId?: string | null } = {}) {
+export async function invite(
+  email: string,
+  opts: { role?: string; managerId?: string | null; department?: string | null } = {},
+) {
   loadDotenvIfNeeded()
   const resp = await fetch(`${baseUrl()}/api/dev/invite`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, role: opts.role, managerId: opts.managerId ?? null }),
+    body: JSON.stringify({
+      email,
+      role: opts.role,
+      managerId: opts.managerId ?? null,
+      department: opts.department ?? null,
+    }),
   })
   if (resp.ok) return
   const body = await resp.text()

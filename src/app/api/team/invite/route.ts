@@ -21,6 +21,7 @@ export async function POST(req: Request) {
     email?: string
     manager_id?: string | null
     role?: string
+    department?: string | null
   }
 
   const email = (body.email || '').trim().toLowerCase()
@@ -58,6 +59,7 @@ export async function POST(req: Request) {
     email,
     manager_id: managerId,
     access_level: role,
+    department: (body.department || '').trim() || null,
     invited_by: caller.id,
   })
 

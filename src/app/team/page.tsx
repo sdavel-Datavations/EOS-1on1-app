@@ -11,6 +11,7 @@ type Person = {
   email: string | null
   access_level: 'member' | 'manager' | 'admin' | null
   manager_id: string | null
+  department: string | null
 }
 
 type Invite = {
@@ -18,6 +19,7 @@ type Invite = {
   email: string
   access_level: string
   manager_id: string | null
+  department: string | null
   accepted_at: string | null
 }
 
@@ -37,6 +39,7 @@ export default function TeamPage() {
   const [email, setEmail] = useState('')
   const [managerId, setManagerId] = useState('')
   const [level, setLevel] = useState<(typeof LEVELS)[number]>('member')
+  const [dept, setDept] = useState('')
 
   const isAdmin = user?.access_level === 'admin'
 
@@ -46,7 +49,7 @@ export default function TeamPage() {
 
     const { data: profiles, error: profileError } = await sb
       .from('profiles')
-      .select('id, full_name, email, access_level, manager_id')
+      .select('id, full_name, email, access_level, manager_id, department')
       .order('full_name')
 
     if (profileError && /access_level|does not exist|could not find/i.test(profileError.message)) {
@@ -59,7 +62,7 @@ export default function TeamPage() {
     // No insert policy on invitations, so this read is the only client access.
     const { data: pending } = await sb
       .from('invitations')
-      .select('id, email, access_level, manager_id, accepted_at')
+      .select('id, email, access_level, manager_id, department, accepted_at')
       .is('accepted_at', null)
       .order('created_at', { ascending: false })
     setInvites((pending as Invite[]) || [])
@@ -94,6 +97,7 @@ export default function TeamPage() {
       email: email.trim(),
       manager_id: managerId || null,
       role: level,
+      department: dept.trim() || null,
     })
     if (result) {
       setNotice(`${email.trim()} can now sign up. They'll land under the manager you picked.`)
@@ -104,6 +108,16 @@ export default function TeamPage() {
   const setManager = async (userId: string, newManagerId: string) => {
     const result = await post('/api/team/manager', { user_id: userId, manager_id: newManagerId || null })
     if (result) setNotice('Reporting line updated.')
+  }
+
+  const setDepartment = async (userId: string, newDept: string) => {
+    const person = people.find(p => p.id === userId)
+    const result = await post('/api/team/manager', {
+      user_id: userId,
+      manager_id: person?.manager_id ?? null,
+      department: newDept,
+    })
+    if (result) setNotice(newDept ? `Department set to ${newDept}.` : 'Department cleared.')
   }
 
   const setLevelFor = async (userId: string, newLevel: string) => {
@@ -139,6 +153,8 @@ export default function TeamPage() {
 
   // Only people who can actually hold reports, to keep the picker usable.
   const possibleManagers = people.filter(p => p.access_level === 'manager' || p.access_level === 'admin')
+  // Free text with suggestions, so a new department needs no migration.
+  const departments = [...new Set(people.map(p => p.department).filter(Boolean) as string[])].sort()
 
   return (
     <div className="min-h-screen">
@@ -163,6 +179,8 @@ export default function TeamPage() {
         <p className="text-sm text-gray mb-6">
           Signup is invite-only. Inviting someone under a manager is what lets that manager see
           their 1-on-1s and tasks &mdash; read-only, so oversight never means editing an agenda.
+          A department lets everyone in it see each other&apos;s shared tasks, so work can be picked
+          up without being handed over. Commitments raised inside a 1-on-1 stay private by default.
         </p>
 
         {notReady && (
@@ -202,6 +220,19 @@ export default function TeamPage() {
                     ))}
                   </select>
                 </div>
+                <div>
+                  <label className="text-[11px] font-bold uppercase tracking-wide text-gray block mb-1">Department</label>
+                  <input
+                    list="departments"
+                    value={dept}
+                    onChange={e => setDept(e.target.value)}
+                    placeholder="Marketing"
+                    className="border border-light-gray rounded-lg px-3 py-2 text-sm w-36 focus:border-steel-blue focus:outline-none"
+                  />
+                  <datalist id="departments">
+                    {departments.map(d => <option key={d} value={d} />)}
+                  </datalist>
+                </div>
                 {isAdmin && (
                   <div>
                     <label className="text-[11px] font-bold uppercase tracking-wide text-gray block mb-1">Access</label>
@@ -239,7 +270,8 @@ export default function TeamPage() {
                     <div key={i.id} className="flex items-center justify-between bg-white border border-light-gray rounded-lg p-3">
                       <span className="text-sm text-near-black">{i.email}</span>
                       <span className="text-xs text-gray">
-                        {i.access_level} &middot; reports to {nameFor(i.manager_id)}
+                        {i.access_level}
+                        {i.department ? ` · ${i.department}` : ''} &middot; reports to {nameFor(i.manager_id)}
                       </span>
                     </div>
                   ))}
@@ -276,6 +308,16 @@ export default function TeamPage() {
                             <option key={m.id} value={m.id}>{m.full_name || m.email}</option>
                           ))}
                         </select>
+                        <input
+                          list="departments"
+                          defaultValue={p.department || ''}
+                          onBlur={e => {
+                            if ((e.target.value || '') !== (p.department || '')) setDepartment(p.id, e.target.value)
+                          }}
+                          placeholder="Department"
+                          disabled={busy}
+                          className="border border-light-gray rounded px-2 py-1 text-xs w-28 focus:border-steel-blue focus:outline-none disabled:opacity-50"
+                        />
                         <select
                           value={p.access_level || 'member'}
                           onChange={e => setLevelFor(p.id, e.target.value)}
@@ -287,7 +329,8 @@ export default function TeamPage() {
                       </>
                     ) : (
                       <span className="text-xs text-gray">
-                        {p.access_level || 'member'} &middot; reports to {nameFor(p.manager_id)}
+                        {p.access_level || 'member'}
+                        {p.department ? ` · ${p.department}` : ''} &middot; reports to {nameFor(p.manager_id)}
                       </span>
                     )}
                   </div>

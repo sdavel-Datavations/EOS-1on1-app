@@ -19,10 +19,11 @@ export async function POST(req: Request) {
   const service = process.env.SUPABASE_SERVICE_ROLE_KEY
   if (!url || !service) return NextResponse.json({ error: 'server not configured' }, { status: 500 })
 
-  const { email, role, managerId } = (await req.json().catch(() => ({}))) as {
+  const { email, role, managerId, department } = (await req.json().catch(() => ({}))) as {
     email?: string
     role?: string
     managerId?: string | null
+    department?: string | null
   }
   if (!email) return NextResponse.json({ error: 'email is required' }, { status: 400 })
 
@@ -31,6 +32,7 @@ export async function POST(req: Request) {
     email,
     access_level: role || 'member',
     manager_id: managerId ?? null,
+    department: department ?? null,
   })
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })

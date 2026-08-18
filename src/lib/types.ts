@@ -6,6 +6,7 @@ export interface Profile {
   /** Added by supabase-access-control.sql. */
   access_level?: 'member' | 'manager' | 'admin'
   manager_id?: string | null
+  department?: string | null
 }
 
 export interface Meeting {
@@ -101,6 +102,10 @@ export interface Commitment {
   slack_ts?: string | null
   completed_by?: string | null
   completed_via?: string | null
+
+  // Added by supabase-departments.sql.
+  department?: string | null
+  visible_to_department?: boolean | null
 }
 
 /** A commitment with the date of the meeting it came from, for the tracker. */
@@ -116,7 +121,7 @@ export const COMPLETED_VIA_LABEL: Record<string, string> = {
   email_link: 'from the email link',
 }
 
-export type TaskFilter = 'all' | 'mine' | 'assigned_by_me'
+export type TaskFilter = 'all' | 'mine' | 'assigned_by_me' | 'department'
 
 export type DueBucket = 'overdue' | 'today' | 'this_week' | 'later' | 'no_date'
 

@@ -16,6 +16,7 @@ export async function POST(req: Request) {
     user_id?: string
     manager_id?: string | null
     role?: string
+    department?: string | null
   }
 
   if (!body.user_id) {
@@ -45,12 +46,14 @@ export async function POST(req: Request) {
 
   const fields: Record<string, unknown> = { manager_id: body.manager_id ?? null }
   if (body.role) fields.access_level = body.role
+  // '' clears it; undefined leaves it untouched.
+  if (body.department !== undefined) fields.department = (body.department || '').trim() || null
 
   const { data, error } = await caller.admin
     .from('profiles')
     .update(fields)
     .eq('id', body.user_id)
-    .select('id, full_name, access_level, manager_id')
+    .select('id, full_name, access_level, manager_id, department')
     .maybeSingle()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })

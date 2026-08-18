@@ -450,3 +450,79 @@ test('a member cannot promote themselves to admin', async ({ page }) => {
   })
   expect(badInvite.status()).toBe(403)
 })
+
+test('a department sees each others shared tasks but not private 1-on-1 commitments', async ({ page, browser }) => {
+  test.skip(
+    !(await tableExists('invitations')),
+    'run supabase-access-control.sql and supabase-departments.sql in the Supabase SQL editor',
+  )
+
+  const stamp = Date.now()
+  const alphaEmail = `dept-a+${stamp}@example.com`
+  const betaEmail = `dept-b+${stamp}@example.com`
+  const outsiderEmail = `dept-c+${stamp}@example.com`
+  const password = 'Password123!'
+
+  // Two in Marketing, one in Sales. Department comes off the invitation.
+  await invite(alphaEmail, { department: 'Marketing' })
+  await invite(betaEmail, { department: 'Marketing' })
+  await invite(outsiderEmail, { department: 'Sales' })
+  await createUser(alphaEmail, password, 'Alpha Marketer')
+  await createUser(betaEmail, password, 'Beta Marketer')
+  await createUser(outsiderEmail, password, 'Carol Sales')
+
+  const deptReady = await (async () => {
+    // Skip cleanly if supabase-departments.sql hasn't run: without it the column
+    // is absent and nothing here can hold.
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+    const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+    const res = await fetch(`${url}/rest/v1/weekly_commitments?select=visible_to_department&limit=1`, {
+      headers: { apikey: anon!, Authorization: `Bearer ${anon}` },
+    })
+    return res.ok
+  })()
+  test.skip(!deptReady, 'visible_to_department missing — run supabase-departments.sql')
+
+  // Alpha raises a mid-week task, which defaults to department-visible
+  await login(page, alphaEmail, password)
+  await page.goto('/tasks')
+  await page.getByPlaceholder('What needs doing?').fill('Refresh the campaign landing page')
+  await page.getByRole('button', { name: /Add & Notify/ }).click()
+  await expect(page.getByText('Refresh the campaign landing page')).toBeVisible({ timeout: 20000 })
+
+  // Alpha also raises one inside a 1-on-1, which defaults to private — a 1-on-1
+  // is a performance conversation, not departmental noise.
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Start 1-on-1' }).click()
+  await expect(page).toHaveURL(/.*\/meeting\/.+/)
+  await page.getByPlaceholder('Commitment title').fill('Work on presentation confidence')
+  await page.getByRole('button', { name: 'Add Commitment' }).click()
+  await expect(page.getByText('Work on presentation confidence')).toBeVisible({ timeout: 10000 })
+
+  // Beta, same department, sees the shared one and not the private one
+  const betaCtx = await browser.newContext()
+  const betaPage = await betaCtx.newPage()
+  await login(betaPage, betaEmail, password)
+  await betaPage.goto('/tasks')
+  await expect(betaPage.getByText('Refresh the campaign landing page')).toBeVisible({ timeout: 15000 })
+  await expect(betaPage.getByText('Work on presentation confidence')).toHaveCount(0)
+
+  // Tagged with the department, and it shows under the department filter
+  await expect(betaPage.getByText('MARKETING').first()).toBeVisible()
+  await betaPage.getByRole('button', { name: 'My department' }).click()
+  await expect(betaPage.getByText('Refresh the campaign landing page')).toBeVisible()
+
+  // Read-only: no toggle on somebody else's task, so helping out cannot mean
+  // silently closing it
+  await expect(betaPage.getByTitle('Mark as done')).toHaveCount(0)
+  await betaCtx.close()
+
+  // Carol, different department, sees neither
+  const carolCtx = await browser.newContext()
+  const carolPage = await carolCtx.newPage()
+  await login(carolPage, outsiderEmail, password)
+  await carolPage.goto('/tasks')
+  await expect(carolPage.getByText('Nothing open here.')).toBeVisible({ timeout: 15000 })
+  await expect(carolPage.getByText('Refresh the campaign landing page')).toHaveCount(0)
+  await carolCtx.close()
+})

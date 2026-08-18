@@ -459,21 +459,35 @@ export async function createStandaloneCommitment(item: {
   due_date?: string | null
   notify_email?: boolean
   notify_slack?: boolean
+  visible_to_department?: boolean
 }) {
-  return getSupabase()
-    .from('weekly_commitments')
-    .insert({
-      meeting_id: null,
-      creator_id: item.creator_id,
-      assignee_id: item.assignee_id,
-      title: item.title,
-      description: '',
-      due_date: item.due_date || null,
-      notify_email: item.notify_email ?? true,
-      notify_slack: item.notify_slack ?? true,
-    })
-    .select()
-    .single()
+  const base = {
+    meeting_id: null,
+    creator_id: item.creator_id,
+    assignee_id: item.assignee_id,
+    title: item.title,
+    description: '',
+    due_date: item.due_date || null,
+    notify_email: item.notify_email ?? true,
+    notify_slack: item.notify_slack ?? true,
+  }
+
+  const sb = getSupabase()
+  // Omitted when not specified so the database trigger picks the default —
+  // visible for a mid-week task, private for one raised in a 1-on-1.
+  const row =
+    item.visible_to_department === undefined
+      ? base
+      : { ...base, visible_to_department: item.visible_to_department }
+
+  const first = await sb.from('weekly_commitments').insert(row).select().single()
+
+  // Before supabase-departments.sql the column doesn't exist. Adding a task
+  // matters more than recording who it's shared with, so retry without it.
+  if (first.error && (first.error.code === 'PGRST204' || /visible_to_department/i.test(first.error.message))) {
+    return sb.from('weekly_commitments').insert(base).select().single()
+  }
+  return first
 }
 
 /**

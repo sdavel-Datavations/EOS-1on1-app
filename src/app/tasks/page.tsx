@@ -60,10 +60,10 @@ export default function TasksPage() {
         <p className="text-sm text-gray mb-6">
           Anything that comes up during the week. Assign it, give it a due date, and the owner gets a
           Slack DM they can close by replying &ldquo;done&rdquo;. Commitments from your 1-on-1s show
-          up here too.
+          up here too, and anything shared to your department appears so you can pick it up.
         </p>
 
-        <TaskBoard userId={user.id} userName={user.full_name} />
+        <TaskBoard userId={user.id} userName={user.full_name} department={user.department} />
       </main>
     </div>
   )
