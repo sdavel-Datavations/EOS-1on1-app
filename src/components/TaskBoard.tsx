@@ -59,7 +59,16 @@ export default function TaskBoard({
     if (filter === 'mine') return c.assignee_id === userId
     if (filter === 'assigned_by_me') return c.creator_id === userId && c.assignee_id !== userId
     // Someone else's work, shared to the department I'm in — the "can I help?" view.
-    if (filter === 'department') return c.assignee_id !== userId && Boolean(c.visible_to_department)
+    // Compares the task's own department rather than just "not mine", so a report's
+    // task I can see through the reporting line doesn't masquerade as departmental.
+    if (filter === 'department') {
+      return (
+        c.assignee_id !== userId &&
+        Boolean(c.visible_to_department) &&
+        Boolean(department) &&
+        (c.department || '').trim().toLowerCase() === (department || '').trim().toLowerCase()
+      )
+    }
     return true
   })
   const open = visible.filter(c => c.status === 'open')
@@ -348,20 +357,34 @@ function Row({
 }) {
   const isDone = c.status === 'done'
   const overdue = !isDone && c.due_date !== null && c.due_date < today
+  // Departmental and oversight visibility are read-only, so showing a checkbox
+  // that the database will refuse is worse than showing none.
+  const canEdit = c.assignee_id === userId || c.creator_id === userId
   const completer = (c as TrackedCommitment & { completer?: { full_name: string | null } | null }).completer
 
   return (
     <div className="flex items-center gap-3 p-3 bg-white border border-light-gray rounded-lg">
-      <button
-        onClick={onToggle}
-        disabled={busy}
-        title={isDone ? 'Mark as open' : 'Mark as done'}
-        className={`w-6 h-6 rounded flex items-center justify-center text-xs border-2 flex-shrink-0 transition disabled:opacity-50 ${
-          isDone ? 'bg-green border-green text-white' : 'border-light-gray text-transparent hover:border-green'
-        }`}
-      >
-        ✓
-      </button>
+      {canEdit ? (
+        <button
+          onClick={onToggle}
+          disabled={busy}
+          title={isDone ? 'Mark as open' : 'Mark as done'}
+          className={`w-6 h-6 rounded flex items-center justify-center text-xs border-2 flex-shrink-0 transition disabled:opacity-50 ${
+            isDone ? 'bg-green border-green text-white' : 'border-light-gray text-transparent hover:border-green'
+          }`}
+        >
+          ✓
+        </button>
+      ) : (
+        <span
+          title="Someone else's task — you can see it, but only they can close it"
+          className={`w-6 h-6 rounded flex items-center justify-center text-xs border-2 border-dashed flex-shrink-0 ${
+            isDone ? 'bg-green border-green text-white' : 'border-light-gray text-transparent'
+          }`}
+        >
+          ✓
+        </span>
+      )}
 
       <div className="flex-1 min-w-0">
         <div className={`font-semibold text-sm ${isDone ? 'line-through text-gray' : 'text-near-black'}`}>

@@ -14,7 +14,10 @@ export default function TaskSummary({ userId }: { userId: string }) {
   const { commitments, loading } = useMyCommitments(userId)
 
   const today = todayISO()
-  const open = commitments.filter(c => c.status === 'open')
+  // Assigned to me specifically. The query is scoped by RLS, which for an admin
+  // or a manager includes other people's tasks — a dashboard count of those would
+  // read as a personal workload it isn't.
+  const open = commitments.filter(c => c.status === 'open' && c.assignee_id === userId)
   const groups = groupByDue(open, today)
   const dueNow = groups.overdue.length + groups.today.length
 

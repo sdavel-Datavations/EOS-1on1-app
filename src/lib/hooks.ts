@@ -532,14 +532,14 @@ export function useMyCommitments(userId: string | undefined) {
     if (!userId) return
     const sb = getSupabase()
 
-    // Assigned to me, or assigned by me to someone else — a manager needs to see
-    // what he's waiting on, not just what he owes.
-    const mine = `assignee_id.eq.${userId},creator_id.eq.${userId}`
+    // No assignee/creator filter: RLS already decides what is visible, and it
+    // grants more than that — tasks shared to your department, and anything
+    // belonging to someone below you in the reporting line. Filtering here as
+    // well would silently hide exactly those, which is the bug this replaced.
     const run = (columns: string) =>
       sb
         .from('weekly_commitments')
         .select(columns)
-        .or(mine)
         .order('due_date', { ascending: true, nullsFirst: false })
 
     const BASE = '*, meeting:meetings(meeting_date)'
