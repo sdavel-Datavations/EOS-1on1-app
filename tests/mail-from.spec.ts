@@ -46,4 +46,23 @@ test.describe('reports what is wrong', () => {
   test('a missing top-level domain is refused', () => {
     expect(normalizeFromAddress('1on1@localhost').from).toBeUndefined()
   })
+
+  test('a doubled @ is refused, and the value is quoted back', () => {
+    // This one cost a day of silent failures in production. Resend's own message
+    // is a generic "Invalid `from` field" that names nothing, so the doubled @ is
+    // invisible on screen and invisible in the logs. Quoting the value back is
+    // what turned it into a thirty-second diagnosis from notification_log.
+    //
+    // Deliberately NOT repaired to a single @: every other repair here is
+    // formatting noise that leaves the address itself alone, and rewriting who
+    // mail claims to be from is a config error to fix, not to guess at.
+    const { from, error } = normalizeFromAddress('noreply@@marketing.task.datavations.com')
+    expect(from).toBeUndefined()
+    expect(error).toContain('noreply@@marketing.task.datavations.com')
+  })
+
+  test('the corrected form of that same value is accepted', () => {
+    expect(normalizeFromAddress('noreply@marketing.task.datavations.com').from)
+      .toBe('noreply@marketing.task.datavations.com')
+  })
 })
