@@ -2,9 +2,11 @@
 
 import { use, useState, useEffect, useRef, useCallback } from 'react'
 import Link from 'next/link'
-import { useAuth, useMeeting, updateSegueNote, upsertSegueNote, updateHeadline, upsertHeadline, upsertScorecardItem, deleteScorecardItem, upsertIssue, deleteIssue, upsertTodo, deleteTodo, updateMeeting, updateSectionTimer, useCommitments, createCommitment, updateCommitment, setCommitmentStatus, describeCommitmentError, addParticipantByEmail, removeParticipant, useExtractedItems, importActionItems, acceptExtractedItem, rejectExtractedItem, useRocks, createRock, setRockCheckin, setRockStatus, deleteRock } from '@/lib/hooks'
+import { useAuth, useMeeting, updateSegueNote, upsertSegueNote, updateHeadline, upsertHeadline, upsertScorecardItem, deleteScorecardItem, upsertIssue, deleteIssue, upsertTodo, deleteTodo, updateMeeting, updateSectionTimer, useCommitments, createCommitment, updateCommitment, setCommitmentStatus, describeCommitmentError, addParticipantByEmail, removeParticipant, useExtractedItems, importActionItems, acceptExtractedItem, rejectExtractedItem, useRocks, createRock, setRockCheckin, setRockStatus, deleteRock, useOpenWork } from '@/lib/hooks'
 import { SECTIONS, ROCK_STATUS_LABEL } from '@/lib/types'
 import { quarterOf, quarterLabel, selectableQuarters } from '@/lib/quarters'
+import { todayISO, describeDue } from '@/lib/tracker'
+import { isOverdue, sourceLabel, countRows, type OpenWorkItem } from '@/lib/open-work'
 import type { ScorecardItem, Issue, Todo, SegueNote, Headline, SectionTimer, ParticipantRole, ExtractedItem, Rock, RockStatus } from '@/lib/types'
 
 type Participant = {
@@ -341,6 +343,9 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
             {participantsError} Showing the manager and report only until then.
           </div>
         )}
+        {/* Still-open work from elsewhere, so nothing has to be remembered to get raised */}
+        <OpenWorkPanel meetingId={id} participants={participants} />
+
         {/* Action items from the notetaker → review queue */}
         <div className="bg-white rounded-xl border border-light-gray p-6">
           <h2 className="text-lg font-bold text-deep-purple mb-2">Import Next Steps</h2>
@@ -869,6 +874,178 @@ function ActionItemImport({ meetingId, meetingDate, participants, currentUserId,
           {extracting ? 'Reading...' : 'Review next steps'}
         </button>
       </div>
+    </div>
+  )
+}
+
+/**
+ * Everything the people in this meeting still owe from elsewhere: tasks raised
+ * mid-week, and commitments from earlier 1-on-1s that never got closed.
+ *
+ * The whole point is that nothing has to be remembered or re-entered to get
+ * discussed — if it is open anywhere, it is on the agenda. Rows are read from the
+ * task list rather than copied on to it, the same rule Rocks follow, so ticking
+ * one off closes the actual task in the one place it exists.
+ */
+function OpenWorkPanel({ meetingId, participants }: {
+  meetingId: string, participants: Participant[]
+}) {
+  const ownerIds = participants.map(p => p.id).filter(Boolean)
+  const { work, loading, error, refetch } = useOpenWork(meetingId, ownerIds)
+  const [closing, setClosing] = useState<string | null>(null)
+  const [closeError, setCloseError] = useState<string | null>(null)
+  const today = todayISO()
+
+  const nameFor = (userId: string) => {
+    const p = participants.find(x => x.id === userId)
+    return p?.full_name || p?.email || 'Someone else'
+  }
+
+  const close = async (id: string) => {
+    setClosing(id)
+    setCloseError(null)
+    // setCommitmentStatus, not updateCommitment: it stamps completed_at and
+    // redraws the Slack message, so closing something here does not leave a live
+    // "Mark done" button sitting in someone's DMs.
+    const { error: failure } = await setCommitmentStatus(id, 'done')
+    if (failure) setCloseError(describeCommitmentError(failure))
+    await refetch()
+    setClosing(null)
+  }
+
+  const group = (label: string, items: OpenWorkItem[]) => items.length === 0 ? null : (
+    <div key={label}>
+      <h3 className="text-[11px] font-bold text-gray uppercase tracking-wider mb-2">
+        {label} · {countRows(items)}
+      </h3>
+      <div className="space-y-2">
+        {items.map(item => (
+          <OpenWorkRow
+            key={item.id}
+            item={item}
+            today={today}
+            nameFor={nameFor}
+            onClose={close}
+            closing={closing}
+          />
+        ))}
+      </div>
+    </div>
+  )
+
+  const problem = closeError || error
+
+  return (
+    <div data-testid="open-work" className="bg-white rounded-xl border border-light-gray p-6">
+      <div className="flex items-baseline justify-between mb-2">
+        <h2 className="text-lg font-bold text-deep-purple">Open Work</h2>
+        {work.count > 0 && (
+          <span className="text-[11px] text-gray">
+            {work.count} open
+            {work.overdue > 0 && (
+              <span className="text-coral-red font-semibold"> · {work.overdue} missed</span>
+            )}
+          </span>
+        )}
+      </div>
+      <p className="text-sm text-gray mb-4">
+        Anything these people still owe, wherever it was raised. Ticking one off closes the real
+        task — here, on the tasks page, and in Slack.
+      </p>
+
+      {problem && (
+        <div className="bg-red-light text-coral-red text-sm p-3 rounded-lg mb-4">{problem}</div>
+      )}
+
+      {loading ? (
+        <p className="text-sm text-gray">Loading open work...</p>
+      ) : work.count === 0 ? (
+        <p className="text-sm text-gray">
+          Nothing outstanding — everything raised before this meeting is closed.
+        </p>
+      ) : (
+        <div className="space-y-4">
+          {group('Carried over from earlier 1-on-1s', work.carried)}
+          {group('Raised during the week', work.midweek)}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function OpenWorkRow({ item, nested, today, nameFor, onClose, closing }: {
+  item: OpenWorkItem
+  nested?: boolean
+  today: string
+  nameFor: (id: string) => string
+  onClose: (id: string) => void
+  closing: string | null
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const missed = isOverdue(item, today)
+  const kids = item.children || []
+  const missedKids = kids.filter(k => isOverdue(k, today)).length
+  // A missed subtask hidden inside a collapsed parent is the one thing this panel
+  // exists to surface, so it forces itself open.
+  const showKids = kids.length > 0 && (expanded || missedKids > 0)
+
+  return (
+    <div>
+      <div className={`flex items-start gap-3 p-3 rounded-lg border ${
+        missed ? 'bg-red-light border-coral-red border-l-4' : 'border-light-gray'
+      }`}>
+        <button
+          onClick={() => onClose(item.id)}
+          disabled={closing === item.id}
+          className="w-6 h-6 mt-0.5 rounded flex items-center justify-center text-xs border-2 flex-shrink-0 transition border-light-gray text-transparent hover:border-green hover:text-green disabled:opacity-40"
+          title="Mark as done"
+        >
+          ✓
+        </button>
+        <div className="flex-1 min-w-0">
+          <div className={`font-semibold text-sm ${missed ? 'text-coral-red' : 'text-near-black'}`}>
+            {item.title}
+            {missed && (
+              <span className="ml-2 text-[10px] font-bold px-1.5 py-0.5 rounded bg-coral-red text-white align-middle">
+                MISSED
+              </span>
+            )}
+          </div>
+          <div className="text-xs text-gray">
+            {nameFor(item.assignee_id)} ·{' '}
+            <span className={missed ? 'text-coral-red font-semibold' : ''}>
+              {describeDue(item.due_date, today)}
+            </span>
+            {!nested && <> · {sourceLabel(item)}</>}
+          </div>
+          {kids.length > 0 && (
+            <button
+              onClick={() => setExpanded(!expanded)}
+              className="text-xs text-steel-blue hover:underline mt-1"
+            >
+              {showKids ? 'Hide' : 'Show'} {kids.length} open subtask{kids.length === 1 ? '' : 's'}
+              {missedKids > 0 && <span className="text-coral-red font-semibold"> · {missedKids} missed</span>}
+            </button>
+          )}
+        </div>
+      </div>
+      {showKids && (
+        // A left rule rather than indentation alone: once a missed parent and its
+        // missed subtasks are all painted red, spacing stops reading as hierarchy.
+        <div className="mt-2 ml-3 pl-4 border-l-2 border-light-gray space-y-2">
+          {kids.map(kid => (
+            <OpenWorkRow
+              key={kid.id}
+              item={kid}
+              nested
+              today={today}
+              nameFor={nameFor}
+              onClose={onClose}
+              closing={closing}
+            />
+          ))}
+        </div>
+      )}
     </div>
   )
 }

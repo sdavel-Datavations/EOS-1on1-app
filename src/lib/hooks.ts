@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { createClient } from './supabase'
 import { findExactDuplicate, type ExistingItem } from './dedupe'
 import { parseActionItems, resolveOwner } from './parse-action-items'
+import { partitionOpenWork, EMPTY_OPEN_WORK, type OpenWork } from './open-work'
 import type { Rock, RockCheckin, RockStatus, Meeting, SegueNote, ScorecardItem, Headline, Issue, Todo, SectionTimer, Profile, Commitment, TrackedCommitment, Teammate, MeetingParticipant, ParticipantRole, ExtractedItem } from './types'
 
 function getSupabase() {
@@ -607,6 +608,49 @@ export function useMyCommitments(userId: string | undefined) {
   useEffect(() => { fetchMine() }, [fetchMine])
 
   return { commitments, loading, error, notificationsReady, refetch: fetchMine }
+}
+
+/**
+ * Every still-open task belonging to anyone in this meeting, sourced from
+ * everywhere except this meeting: tasks raised mid-week, and commitments from
+ * earlier 1-on-1s that never got closed.
+ *
+ * Read onto the agenda rather than copied on to it, exactly as Rocks are. That is
+ * what lets a row here be ticked off and have it mean something — the checkbox
+ * closes the real task, in the one place it exists.
+ */
+export function useOpenWork(meetingId: string, ownerIds: string[]) {
+  const [work, setWork] = useState<OpenWork>(EMPTY_OPEN_WORK)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  // Stable dependency: a fresh array each render would refetch forever.
+  const ownerKey = [...ownerIds].sort().join(',')
+
+  const fetchWork = useCallback(async () => {
+    if (!meetingId || !ownerKey) {
+      setWork(EMPTY_OPEN_WORK)
+      setLoading(false)
+      return
+    }
+
+    // No visibility filter of our own: RLS decides what is readable, and it
+    // grants more than assignee_id alone. Re-filtering here is the bug that
+    // silently hid departmental and oversight tasks from the task board.
+    const { data, error } = await getSupabase()
+      .from('weekly_commitments')
+      .select('*, meeting:meetings(meeting_date)')
+      .in('assignee_id', ownerKey.split(','))
+      .eq('status', 'open')
+
+    setError(error ? describeCommitmentError(error) : null)
+    setWork(partitionOpenWork((data as unknown as TrackedCommitment[]) || [], meetingId))
+    setLoading(false)
+  }, [meetingId, ownerKey])
+
+  useEffect(() => { fetchWork() }, [fetchWork])
+
+  return { work, loading, error, refetch: fetchWork }
 }
 
 /**

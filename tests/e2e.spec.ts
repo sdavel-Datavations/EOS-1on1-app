@@ -604,3 +604,55 @@ test('a main task holds subtasks and reports progress', async ({ page }) => {
   await page.getByRole('button', { name: /1 of 2 done/ }).click()
   await expect(page.getByText('Draft the member onboarding copy')).toHaveCount(1)
 })
+
+test('open work from elsewhere lands on the agenda, and closing it there closes the task', async ({ page }) => {
+  test.skip(
+    !(await trackerReady()),
+    'completed_at column missing — run supabase-weekly-tracker.sql in the Supabase SQL editor',
+  )
+
+  const email = `openwork+${Date.now()}@example.com`
+  await seedAndLogin(page, email, 'Password123!', 'Open Work Tester')
+
+  // A task raised mid-week, belonging to no meeting at all
+  await page.goto('/tasks')
+  await page.getByPlaceholder('What needs doing?').fill('Chase the vendor invoice')
+  await page.getByRole('button', { name: /Add & Notify/ }).click()
+  await expect(page.getByText('Chase the vendor invoice')).toBeVisible({ timeout: 15000 })
+
+  // First 1-on-1: the mid-week task is pulled on to the agenda without anyone
+  // re-entering it, which is the entire point.
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Start 1-on-1' }).click()
+  await expect(page).toHaveURL(/.*\/meeting\/.+/)
+  const firstMeeting = page.url()
+  const panel = page.getByTestId('open-work')
+  await expect(panel.getByText('Chase the vendor invoice')).toBeVisible({ timeout: 15000 })
+  await expect(panel.getByText('Raised during the week · 1')).toBeVisible()
+
+  // A commitment raised in THIS meeting stays out of the panel — it already has
+  // its own section, and listing it twice reads as two separate obligations.
+  await page.getByPlaceholder('Commitment title').fill('Send the Q3 scorecard')
+  await page.getByRole('button', { name: 'Add Commitment' }).click()
+  await expect(page.getByText('Send the Q3 scorecard')).toBeVisible({ timeout: 10000 })
+  await page.reload()
+  await expect(panel.getByText('Chase the vendor invoice')).toBeVisible({ timeout: 15000 })
+  await expect(panel.getByText('Send the Q3 scorecard')).toHaveCount(0)
+
+  // Next 1-on-1: last meeting's unfinished commitment now carries forward
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Start 1-on-1' }).click()
+  await expect(page).toHaveURL(/.*\/meeting\/.+/)
+  expect(page.url()).not.toBe(firstMeeting)
+  await expect(panel.getByText('Send the Q3 scorecard')).toBeVisible({ timeout: 15000 })
+  await expect(panel.getByText('Chase the vendor invoice')).toBeVisible()
+  await expect(panel.getByText('Carried over from earlier 1-on-1s · 1')).toBeVisible()
+
+  // Ticking it off here closes the real task, not a copy of it. A copy is the
+  // failure this design avoids: two rows, one closed, the work still owed.
+  await panel.getByTitle('Mark as done').first().click()
+  await expect(panel.getByText('2 open')).toHaveCount(0, { timeout: 15000 })
+
+  await page.goto('/tasks')
+  await expect(page.getByText(/Done this week · 1/)).toBeVisible({ timeout: 15000 })
+})
