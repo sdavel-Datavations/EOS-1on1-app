@@ -31,6 +31,26 @@ export function byDueDate<T extends { due_date: string | null }>(items: T[]): T[
 }
 
 /**
+ * Whether a row belongs at the top of a list rather than nested under a parent.
+ *
+ * A subtask whose parent is not in `visibleIds` has to render at top level or it
+ * renders nowhere at all — it is not a parent, and the parent that would have
+ * drawn it is absent. That is the normal case once subtasks can be assigned:
+ * you are handed one piece of someone else's task, and RLS shows you the piece
+ * without the whole. Dropping it would mean work assigned to you that you can
+ * never see.
+ *
+ * `parent_id === id` is a row naming itself as its own parent. A trigger prevents
+ * it; losing work to one bad row is worse than the cost of checking.
+ */
+export function isTopLevel(
+  item: { id: string; parent_id?: string | null },
+  visibleIds: Set<string>,
+): boolean {
+  return !item.parent_id || item.parent_id === item.id || !visibleIds.has(item.parent_id)
+}
+
+/**
  * Nests subtasks under their parent when the parent is open here too.
  *
  * Without this, one main task with eight open subtasks puts nine rows on the
@@ -40,20 +60,13 @@ export function byDueDate<T extends { due_date: string | null }>(items: T[]): T[
  * dropped: it is still work someone owes.
  */
 export function rollUpSubtasks(items: TrackedCommitment[]): OpenWorkItem[] {
-  const byId = new Map(items.map(i => [i.id, i]))
+  const visibleIds = new Set(items.map(i => i.id))
   const children = new Map<string, OpenWorkItem[]>()
   const top: OpenWorkItem[] = []
 
   for (const item of items) {
-    const parentId = item.parent_id
-    // parentId === item.id would nest a row inside itself and drop it from the
-    // agenda entirely. A trigger prevents it; losing work to a bad row is worse
-    // than the cost of checking.
-    if (parentId && parentId !== item.id && byId.has(parentId)) {
-      children.set(parentId, [...(children.get(parentId) || []), { ...item }])
-    } else {
-      top.push({ ...item })
-    }
+    if (isTopLevel(item, visibleIds)) top.push({ ...item })
+    else children.set(item.parent_id!, [...(children.get(item.parent_id!) || []), { ...item }])
   }
 
   for (const parent of top) {

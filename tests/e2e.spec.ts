@@ -667,3 +667,66 @@ test('open work from elsewhere lands on the agenda, and closing it there closes 
   await page.goto('/tasks')
   await expect(page.getByText(/Done this week · 1/)).toBeVisible({ timeout: 15000 })
 })
+
+test('a subtask can be handed to a teammate, and reaches them', async ({ page, browser }) => {
+  test.skip(
+    !(await subtasksReady()),
+    'parent_id column missing — run supabase-subtasks.sql in the Supabase SQL editor',
+  )
+
+  const mateEmail = `submate+${Date.now()}@example.com`
+  const matePassword = 'Password123!'
+  await invite(mateEmail)
+  await createUser(mateEmail, matePassword, 'Sub Mate')
+
+  // Sharing a meeting is what puts someone in the owner dropdown, which is the
+  // only picker a row this narrow has room for.
+  await signInAndStartMeeting(page, 'Main Task Owner')
+  await page.getByPlaceholder('Add participant email').fill(mateEmail)
+  await page.getByRole('button', { name: 'Add', exact: true }).click()
+  await expect(page.getByText('Sub Mate').first()).toBeVisible({ timeout: 10000 })
+
+  await page.goto('/tasks')
+  await page.getByPlaceholder('What needs doing?').fill('Build HIRI Pulse Member edition')
+  await page.getByRole('button', { name: /Add & Notify/ }).click()
+  await expect(page.getByText('Build HIRI Pulse Member edition')).toBeVisible({ timeout: 20000 })
+
+  await page.getByRole('button', { name: '+ Subtask' }).first().click()
+  const subInput = page.getByPlaceholder("What's the next piece of this?")
+  const owner = page.getByLabel('Subtask owner')
+
+  // A piece kept for the owner of the main task stays quiet: breaking your own
+  // task into five is not five handovers, and five DMs for one is why this was
+  // hard-coded off before it could be assigned at all.
+  await subInput.fill('Scope the member tiers')
+  await page.getByRole('button', { name: 'Add', exact: true }).click()
+  await expect(page.getByText('Scope the member tiers')).toBeVisible({ timeout: 15000 })
+  await expect(page.getByText(/Subtask added/)).toHaveCount(0)
+
+  // Handing one to someone else must tell them, naming who it went to
+  await subInput.fill('Wire the member auth flow')
+  await owner.selectOption({ label: 'Sub Mate' })
+  await page.getByRole('button', { name: 'Add', exact: true }).click()
+  await expect(page.getByText(/Subtask added.*Sub Mate/)).toBeVisible({ timeout: 20000 })
+  await expect(page.getByRole('button', { name: /0 of 2 done/ })).toBeVisible({ timeout: 15000 })
+
+  // It really is theirs, not just labelled as theirs
+  const mateContext = await browser.newContext()
+  const matePage = await mateContext.newPage()
+  await login(matePage, mateEmail, matePassword)
+  await matePage.goto('/tasks')
+  await expect(matePage.getByText('Wire the member auth flow')).toBeVisible({ timeout: 15000 })
+  // The piece they were given, and not the piece they were not
+  await expect(matePage.getByText('Scope the member tiers')).toHaveCount(0)
+
+  // And they can close their own piece without touching the main task
+  await matePage.getByTitle('Mark as done').first().click()
+  await expect(matePage.getByText(/Done this week · 1/)).toBeVisible({ timeout: 15000 })
+  await mateContext.close()
+
+  // The main task reflects their progress, and is still open — a main task has a
+  // last step of its own, so closing it stays with whoever owns it.
+  await page.reload()
+  await expect(page.getByRole('button', { name: /1 of 2 done/ })).toBeVisible({ timeout: 20000 })
+  await expect(page.getByText('Build HIRI Pulse Member edition')).toBeVisible()
+})

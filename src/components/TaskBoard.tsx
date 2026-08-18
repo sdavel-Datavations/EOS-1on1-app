@@ -15,6 +15,7 @@ import { groupByDue, describeDue, completedBuckets, DONE_BUCKET_LABEL, DONE_BUCK
 import type { DoneBucket } from '@/lib/tracker'
 import { BUCKET_ORDER, BUCKET_LABEL, COMPLETED_VIA_LABEL } from '@/lib/types'
 import type { TrackedCommitment, DueBucket, TaskFilter } from '@/lib/types'
+import { isTopLevel } from '@/lib/open-work'
 
 const BUCKET_TONE: Record<DueBucket, string> = {
   overdue: 'text-coral-red',
@@ -56,6 +57,7 @@ export default function TaskBoard({
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [subtaskFor, setSubtaskFor] = useState<string | null>(null)
   const [subtaskTitle, setSubtaskTitle] = useState('')
+  const [subtaskAssignee, setSubtaskAssignee] = useState(userId)
   const [openDone, setOpenDone] = useState<Set<DoneBucket>>(new Set(['week']))
 
   const today = todayISO()
@@ -78,14 +80,19 @@ export default function TaskBoard({
   })
   // Subtasks render under their parent, never as their own bucket entry —
   // otherwise a main task and its five subtasks read as six unrelated rows.
+  //
+  // Unless the parent is not visible. Someone can hand you one piece of a task
+  // whose whole RLS does not show you, and a row that is neither top level nor
+  // drawn by a parent renders nowhere: work assigned to you that you cannot see.
+  const visibleIds = new Set(visible.map(c => c.id))
   const subtasksOf = new Map<string, TrackedCommitment[]>()
   for (const c of visible) {
-    if (!c.parent_id) continue
-    const list = subtasksOf.get(c.parent_id) || []
+    if (isTopLevel(c, visibleIds)) continue
+    const list = subtasksOf.get(c.parent_id!) || []
     list.push(c)
-    subtasksOf.set(c.parent_id, list)
+    subtasksOf.set(c.parent_id!, list)
   }
-  const topLevel = visible.filter(c => !c.parent_id)
+  const topLevel = visible.filter(c => isTopLevel(c, visibleIds))
 
   const open = topLevel.filter(c => c.status === 'open')
   const doneGroups = completedBuckets(topLevel.filter(c => c.status === 'done'), today)
@@ -161,30 +168,58 @@ export default function TaskBoard({
     setSaving(false)
   }
 
+  // Same people the main form offers. A teammate who shares no meeting with you
+  // is not listed here — the main form's "or by email" escape hatch has no room
+  // in a row this narrow, so create the piece and reassign it from there.
+  const ownerOptions = [
+    { id: userId, label: userName || 'Me' },
+    ...teammates.map(t => ({ id: t.id, label: t.full_name || t.email })),
+  ]
+
   const addSubtask = async (parent: TrackedCommitment) => {
     if (!subtaskTitle.trim()) return
     setBusyId(parent.id)
     setSaveError(null)
+    setNotice(null)
+
+    const owner = subtaskAssignee || parent.assignee_id || userId
+    // Notify only when this piece goes to someone other than whoever owns the
+    // main task. Splitting your own task into five pieces should be silent; five
+    // DMs for one handover is what the old blanket `false` was avoiding. But that
+    // also meant handing a piece to someone else told them nothing at all, which
+    // is the worse failure: work assigned and never mentioned.
+    const handover = owner !== (parent.assignee_id || userId)
 
     const { data, error: createError } = await createStandaloneCommitment({
       creator_id: userId,
-      // Defaults to whoever owns the main task; reassign afterwards if needed.
-      assignee_id: parent.assignee_id || userId,
+      assignee_id: owner,
       title: subtaskTitle.trim(),
+      // A piece of a task is due when the task is due, unless someone says
+      // otherwise on the task board.
       due_date: parent.due_date,
       parent_id: parent.id,
-      // A subtask is a piece of the parent, so notifying each one turns a single
-      // handover into five DMs. The main task is what gets announced.
-      notify_slack: false,
-      notify_email: false,
+      notify_slack: handover && notifySlack,
+      notify_email: handover && notifyEmail,
     })
 
     if (createError || !data) {
       setSaveError(createError ? describeCommitmentError(createError) : 'Could not add that subtask.')
-    } else {
-      setSubtaskTitle('')
-      setExpanded(prev => new Set(prev).add(parent.id))
-      await refetch()
+      setBusyId(null)
+      return
+    }
+
+    setSubtaskTitle('')
+    setExpanded(prev => new Set(prev).add(parent.id))
+    await refetch()
+
+    if (handover && (notifySlack || notifyEmail)) {
+      const { error: notifyError } = await notifyCommitment(data.id)
+      const who = nameFor(owner)
+      setNotice(
+        notifyError
+          ? `Subtask added for ${who}, but not sent: ${notifyError}`
+          : `Subtask added and sent to ${who}.`,
+      )
     }
     setBusyId(null)
   }
@@ -376,10 +411,15 @@ export default function TaskBoard({
                     onSubtaskOpen={() => {
                       setSubtaskFor(subtaskFor === c.id ? null : c.id)
                       setSubtaskTitle('')
+                      setSubtaskAssignee(c.assignee_id || userId)
                     }}
                     subtaskTitle={subtaskTitle}
                     onSubtaskTitle={setSubtaskTitle}
+                    subtaskAssignee={subtaskAssignee}
+                    onSubtaskAssignee={setSubtaskAssignee}
+                    ownerOptions={ownerOptions}
                     onSubtaskAdd={() => addSubtask(c)}
+                    orphaned={Boolean(c.parent_id)}
                   />
                 ))}
               </div>
@@ -418,10 +458,15 @@ export default function TaskBoard({
                       onSubtaskOpen={() => {
                         setSubtaskFor(subtaskFor === c.id ? null : c.id)
                         setSubtaskTitle('')
+                        setSubtaskAssignee(c.assignee_id || userId)
                       }}
                       subtaskTitle={subtaskTitle}
                       onSubtaskTitle={setSubtaskTitle}
+                      subtaskAssignee={subtaskAssignee}
+                      onSubtaskAssignee={setSubtaskAssignee}
+                      ownerOptions={ownerOptions}
                       onSubtaskAdd={() => addSubtask(c)}
+                      orphaned={Boolean(c.parent_id)}
                     />
                   ))}
                 </div>
@@ -436,7 +481,7 @@ export default function TaskBoard({
 }
 
 function Row({
-  c, today, nameFor, busy, notificationsReady, userId, onToggle, onResend, flat,
+  c, today, nameFor, busy, notificationsReady, userId, onToggle, onResend, flat, orphaned,
 }: {
   c: TrackedCommitment
   today: string
@@ -448,6 +493,12 @@ function Row({
   onResend: () => void
   /** True when TaskGroup already draws the surrounding card. */
   flat?: boolean
+  /**
+   * A subtask standing at top level because its parent is not ours to see.
+   * Without saying so, the title arrives as a fragment with no hint it is part
+   * of anything larger.
+   */
+  orphaned?: boolean
 }) {
   const isDone = c.status === 'done'
   const overdue = !isDone && c.due_date !== null && c.due_date < today
@@ -518,6 +569,7 @@ function Row({
           <span className={overdue ? 'text-coral-red font-semibold' : ''}>
             {isDone ? 'Done' : describeDue(c.due_date, today)}
           </span>
+          {orphaned && <> · one piece of a larger task</>}
           {c.meeting_id && (
             <>
               {' · '}
@@ -571,7 +623,8 @@ function Row({
  */
 function TaskGroup({
   c, userId, subtasks, today, nameFor, busyId, notificationsReady, expanded, onExpand,
-  onToggle, onResend, subtaskOpen, onSubtaskOpen, subtaskTitle, onSubtaskTitle, onSubtaskAdd,
+  onToggle, onResend, subtaskOpen, onSubtaskOpen, subtaskTitle, onSubtaskTitle,
+  subtaskAssignee, onSubtaskAssignee, ownerOptions, onSubtaskAdd, orphaned,
 }: {
   c: TrackedCommitment
   userId: string
@@ -588,7 +641,12 @@ function TaskGroup({
   onSubtaskOpen: () => void
   subtaskTitle: string
   onSubtaskTitle: (value: string) => void
+  subtaskAssignee: string
+  onSubtaskAssignee: (value: string) => void
+  ownerOptions: { id: string; label: string }[]
   onSubtaskAdd: () => void
+  /** This row is itself a subtask whose parent is not visible. */
+  orphaned?: boolean
 }) {
   const total = subtasks.length
   const complete = subtasks.filter(s => s.status === 'done').length
@@ -617,6 +675,7 @@ function TaskGroup({
         onToggle={() => onToggle(c)}
         onResend={() => onResend(c)}
         flat={total > 0}
+        orphaned={orphaned}
       />
 
       <div className="flex items-center gap-3 px-3 pb-2 -mt-1 flex-wrap">
@@ -637,24 +696,38 @@ function TaskGroup({
             />
           </div>
         )}
-        <button
-          onClick={onSubtaskOpen}
-          className="text-[11px] font-bold uppercase tracking-wide text-steel-blue hover:text-deep-purple transition"
-        >
-          {subtaskOpen ? 'Cancel' : '+ Subtask'}
-        </button>
+        {/* Subtasks are one level deep, enforced by a trigger. Offering the button
+            on a row that is itself a subtask only produces a database error. */}
+        {!orphaned && (
+          <button
+            onClick={onSubtaskOpen}
+            className="text-[11px] font-bold uppercase tracking-wide text-steel-blue hover:text-deep-purple transition"
+          >
+            {subtaskOpen ? 'Cancel' : '+ Subtask'}
+          </button>
+        )}
       </div>
 
       {subtaskOpen && (
-        <div className="flex gap-2 px-3 pb-3">
+        <div className="flex gap-2 px-3 pb-3 flex-wrap">
           <input
             value={subtaskTitle}
             onChange={e => onSubtaskTitle(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') onSubtaskAdd() }}
             placeholder="What's the next piece of this?"
             autoFocus
-            className="flex-1 border border-light-gray rounded-lg px-3 py-1.5 text-sm focus:border-steel-blue focus:outline-none"
+            className="flex-1 min-w-[180px] border border-light-gray rounded-lg px-3 py-1.5 text-sm focus:border-steel-blue focus:outline-none"
           />
+          <select
+            value={subtaskAssignee}
+            onChange={e => onSubtaskAssignee(e.target.value)}
+            aria-label="Subtask owner"
+            className="border border-light-gray rounded-lg px-2 py-1.5 text-sm focus:border-steel-blue focus:outline-none"
+          >
+            {ownerOptions.map(o => (
+              <option key={o.id} value={o.id}>{o.label}</option>
+            ))}
+          </select>
           <button
             onClick={onSubtaskAdd}
             disabled={busyId === c.id || !subtaskTitle.trim()}

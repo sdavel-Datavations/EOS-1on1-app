@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { partitionOpenWork, rollUpSubtasks, byDueDate, isOverdue, countRows, sourceLabel } from '../src/lib/open-work'
+import { partitionOpenWork, rollUpSubtasks, byDueDate, isOverdue, countRows, sourceLabel, isTopLevel } from '../src/lib/open-work'
 import type { TrackedCommitment } from '../src/lib/types'
 
 const TODAY = '2026-08-19'
@@ -182,5 +182,43 @@ test.describe('sourceLabel', () => {
     // visible via assignee_id. "From an earlier 1-on-1" beats a blank or "null".
     expect(sourceLabel(task({ id: 'z', meeting_id: 'm', meeting: null })))
       .toBe('From an earlier 1-on-1')
+  })
+})
+
+test.describe('isTopLevel', () => {
+  const visible = new Set(['parent'])
+
+  test('a row with no parent belongs at the top', () => {
+    expect(isTopLevel({ id: 'a', parent_id: null }, visible)).toBe(true)
+    expect(isTopLevel({ id: 'a' }, visible)).toBe(true)
+  })
+
+  test('a subtask whose parent is visible nests under it', () => {
+    expect(isTopLevel({ id: 'kid', parent_id: 'parent' }, visible)).toBe(false)
+  })
+
+  test('a subtask whose parent is hidden rises to the top rather than vanishing', () => {
+    // The normal case once subtasks are assignable: you are handed one piece of
+    // someone else's task, and RLS shows you the piece without the whole. Nesting
+    // it under an absent parent would render it nowhere at all.
+    expect(isTopLevel({ id: 'kid', parent_id: 'not-visible' }, visible)).toBe(true)
+  })
+
+  test('a row naming itself as its own parent is not swallowed', () => {
+    expect(isTopLevel({ id: 'loop', parent_id: 'loop' }, new Set(['loop']))).toBe(true)
+  })
+
+  test('every row lands somewhere: top level or under a visible parent', () => {
+    const rows = [
+      { id: 'parent', parent_id: null },
+      { id: 'kid', parent_id: 'parent' },
+      { id: 'orphan', parent_id: 'gone' },
+    ]
+    const ids = new Set(rows.map(r => r.id))
+    for (const row of rows) {
+      const top = isTopLevel(row, ids)
+      const nestable = Boolean(row.parent_id) && ids.has(row.parent_id!)
+      expect(top || nestable).toBe(true)
+    }
   })
 })

@@ -87,7 +87,14 @@ There is no Anthropic key and no LLM dependency.
 - Rocks live in `rocks`, keyed by (owner_id, quarter), and are **read** by every agenda in
   that quarter rather than copied into it. `rock_checkins` holds the weekly pulse, unique per
   (rock, meeting).
-- Subtasks are one level deep, enforced by a trigger.
+- Subtasks are one level deep, enforced by a trigger, and **assignable to anyone in the owner
+  dropdown** (people you share a meeting with). A piece kept for whoever owns the main task is
+  silent; a piece handed to someone else is notified, so one handover is one DM rather than
+  five. It inherits the parent's due date.
+- **An orphaned subtask must never disappear.** Hand someone one piece of a task whose parent
+  RLS does not show them, and that row is neither top level nor drawn by a parent — it renders
+  nowhere, which is work assigned to someone that they can never see. `isTopLevel()` in
+  `src/lib/open-work.ts` is the single rule, used by both the task board and the agenda panel.
 - Slack message state is redrawn from the row by `syncSlackMessage()`; all four close paths
   (app, email link, Slack reply, Slack button) go through it.
 - No AI/LLM dependency. "Import Next Steps" parses the action-item list Granola or Gemini
