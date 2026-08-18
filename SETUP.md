@@ -5,43 +5,37 @@
 1. Go to [supabase.com/dashboard](https://supabase.com/dashboard) and open your project
 2. Navigate to **SQL Editor** and run these, in order:
    - `supabase-schema.sql` — core tables, RLS policies, and the new-user trigger
-   - `supabase-commitments.sql` — the `weekly_commitments` table used by the Weekly
+   - `supabase-commitments.sql` — the `weekly_commitments` table behind the Weekly
      Commitments panel. Until this runs, that panel shows a "table not found" notice.
    - `supabase-participants.sql` — the `meeting_participants` table, plus the policies
      that grant meeting access by membership rather than by manager/report only.
-     Until this runs, a meeting shows just its manager and report, and anyone added
-     as a third participant cannot open it. Safe to re-run.
+     Until this runs, anyone added as a third participant cannot open the meeting.
    - `supabase-transcripts.sql` — the `extracted_items` review queue behind
-     "Import Next Steps". Depends on the access function created by
-     `supabase-participants.sql`, so run it after. Safe to re-run.
+     "Import Next Steps". Needs the access function from `supabase-participants.sql`.
    - `supabase-delete-meetings.sql` — lets the organiser delete a meeting, and
-     repairs the `todos.carried_from_id` foreign key so the cascade doesn't fail
-     on meetings whose to-dos were carried forward. Until this runs, the delete
-     button reports that nothing was deleted. Safe to re-run.
-   - `supabase-weekly-tracker.sql` — adds `completed_at` and widens the
-     commitments policy to cover tasks that belong to no meeting, which is what
-     the "My Week" panel adds mid-week. Until this runs, that panel can show
-     commitments from meetings but cannot save a standalone task. Safe to re-run.
-   - `supabase-departments.sql` — `profiles.department`, and departmental
-     visibility for mid-week tasks. Read-only, and standalone tasks only:
-     commitments raised in a 1-on-1 stay private to the participants. Safe to re-run.
-   - `supabase-subtasks.sql` — `parent_id`, so a main task can hold subtasks. One
-     level deep, enforced by a trigger. A subtask inherits its parent's visibility,
-     otherwise a progress count would silently omit rows the reader can't see.
-     Safe to re-run.
+     repairs the `todos.carried_from_id` foreign key so the cascade doesn't fail on
+     meetings whose to-dos were carried forward.
+   - `supabase-weekly-tracker.sql` — `completed_at`, and widens the commitments
+     policy to cover tasks belonging to no meeting, which is what the Tasks page
+     adds mid-week.
    - `supabase-notifications.sql` — where each task's Slack message lives (so a
-     threaded "done" reply can be matched back to it), the cached Slack user id,
-     and `notification_log`. Until this runs, `/api/notify` fails. Safe to re-run.
-   - `supabase-departments.sql` — departmental visibility: anyone in a department
-     can see that department's shared tasks, read-only. Mid-week tasks default to
-     shared; commitments raised inside a 1-on-1 default to private. Run after
-     `supabase-access-control.sql`. Safe to re-run.
+     threaded "done" reply can be matched back to it), the cached Slack user id, and
+     `notification_log`. Until this runs, `/api/notify` fails.
    - `supabase-access-control.sql` — **closes a live leak.** `public.profiles` was
      readable with the anon key and no session, and that key ships in the browser
      bundle, so every name and email address was effectively public. Also makes
      signup invite-only, adds the manager reporting line, and adds the admin tier.
      Edit the email at the bottom of the file if the first admin isn't
-     `sam@datavations.com`. Safe to re-run.
+     `sam@datavations.com`.
+   - `supabase-departments.sql` — departmental visibility: anyone in a department
+     can see that department's shared tasks, read-only. Mid-week tasks default to
+     shared; commitments raised inside a 1-on-1 stay private to the participants.
+     Depends on `supabase-access-control.sql`.
+   - `supabase-subtasks.sql` — `parent_id`, so a main task can hold subtasks. One
+     level deep, enforced by a trigger. A subtask inherits its parent's visibility,
+     otherwise a progress count would silently omit rows the reader can't see.
+
+   Every file is safe to re-run, and each is listed in dependency order.
 3. Go to **Authentication > Providers** and make sure **Email** is enabled
 4. Go to **Settings > API** and copy:
    - **Project URL** (e.g. `https://abcdef.supabase.co`)
