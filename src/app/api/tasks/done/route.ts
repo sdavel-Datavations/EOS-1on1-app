@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { verifyActionToken } from '@/lib/action-token'
-import { serviceClient, findTaskById, completeTask } from '@/lib/complete-task'
+import { tryServiceClient, findTaskById, completeTask } from '@/lib/complete-task'
 import { escapeHtml } from '@/lib/mail'
 
 /**
@@ -39,7 +39,10 @@ export async function GET(req: Request) {
   const verdict = verifyActionToken(token)
   if (!verdict.ok) return page('That link is no longer valid', escapeHtml(verdict.error))
 
-  const sb = serviceClient()
+  const service = tryServiceClient()
+  if (!service.ok) return page('Not configured', escapeHtml(service.error))
+  const sb = service.sb
+
   const task = await findTaskById(sb, verdict.payload.commitmentId)
   if (!task) return page('Task not found', 'It may have been deleted.')
   if (task.status === 'done') {
@@ -65,7 +68,10 @@ export async function POST(req: Request) {
       : page('That link is no longer valid', escapeHtml(verdict.error))
   }
 
-  const sb = serviceClient()
+  const service = tryServiceClient()
+  if (!service.ok) return page('Not configured', escapeHtml(service.error))
+  const sb = service.sb
+
   const task = await findTaskById(sb, verdict.payload.commitmentId)
   if (!task) return page('Task not found', 'It may have been deleted.')
 

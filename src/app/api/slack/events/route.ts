@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { verifySlackSignature, postMessage, getUserEmail, slackConfigured } from '@/lib/slack'
 import { isDoneComment } from '@/lib/done-intent'
 import {
-  serviceClient,
+  tryServiceClient,
   findTaskByThread,
   profileForSlackUser,
   completeTask,
@@ -69,7 +69,13 @@ export async function POST(req: Request) {
 
   if (!isDoneComment(text)) return NextResponse.json({ ok: true })
 
-  const sb = serviceClient()
+  const service = tryServiceClient()
+  if (!service.ok) {
+    // 200 on purpose: Slack retries a non-2xx for hours, and a missing
+    // environment variable will not fix itself in the meantime.
+    return NextResponse.json({ ok: true, error: service.error })
+  }
+  const sb = service.sb
 
   const task = await findTaskByThread(sb, channel, threadTs)
   if (!task) return NextResponse.json({ ok: true })

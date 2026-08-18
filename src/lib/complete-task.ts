@@ -15,8 +15,27 @@ export type CompletionVia = 'slack_reply' | 'slack_button' | 'email_link'
 export function serviceClient(): SupabaseClient {
   const url = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').trim()
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY
-  if (!url || !key) throw new Error('Supabase service role is not configured')
+  if (!url || !key) throw new Error(MISSING_SERVICE_ROLE)
   return createServiceClient(url, key, { auth: { persistSession: false } })
+}
+
+export const MISSING_SERVICE_ROLE =
+  'SUPABASE_SERVICE_ROLE_KEY is not set on the server. Notifications and Slack replies need it, ' +
+  'because neither has a user session to act through.'
+
+/**
+ * serviceClient() without the throw.
+ *
+ * Letting it throw produced a 500 with an empty body, which told nobody anything
+ * — the reason only existed in a log the user could not see. Every route that
+ * needs the service role reports the missing configuration instead.
+ */
+export function tryServiceClient(): { ok: true; sb: SupabaseClient } | { ok: false; error: string } {
+  try {
+    return { ok: true, sb: serviceClient() }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : MISSING_SERVICE_ROLE }
+  }
 }
 
 export type TaskRow = {

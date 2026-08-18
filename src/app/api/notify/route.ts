@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { postMessage, lookupUserByEmail, taskBlocks, slackConfigured, escapeMrkdwn } from '@/lib/slack'
 import { sendMail, mailConfigured, taskEmail, appBaseUrl } from '@/lib/mail'
 import { signActionToken } from '@/lib/action-token'
-import { serviceClient, logNotification } from '@/lib/complete-task'
+import { serviceClient, tryServiceClient, logNotification } from '@/lib/complete-task'
 import { describeDue, todayISO } from '@/lib/tracker'
 import { createClient } from '@/lib/supabase-server'
 
@@ -110,7 +110,9 @@ async function run(commitmentId?: string) {
   const today = todayISO()
   const horizon = new Date(Date.now() + HORIZON_DAYS * 86400_000).toISOString().slice(0, 10)
 
-  const sb = serviceClient()
+  const service = tryServiceClient()
+  if (!service.ok) return NextResponse.json({ error: service.error }, { status: 500 })
+  const sb = service.sb
 
   // Service role, because cron has no session. Scoped tightly: open, not yet
   // notified, and actually due soon — never a blanket read of the table.

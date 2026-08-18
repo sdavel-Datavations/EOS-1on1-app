@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { verifySlackSignature, getUserEmail } from '@/lib/slack'
 import {
-  serviceClient,
+  tryServiceClient,
   findTaskById,
   profileForSlackUser,
   completeTask,
@@ -42,7 +42,11 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true })
   }
 
-  const sb = serviceClient()
+  const service = tryServiceClient()
+  if (!service.ok) {
+    return NextResponse.json({ response_type: 'ephemeral', text: service.error })
+  }
+  const sb = service.sb
 
   const task = await findTaskById(sb, action.value)
   if (!task) {
