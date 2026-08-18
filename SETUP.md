@@ -73,8 +73,12 @@ Optional. Skip and the app works, minus the reminders.
 ### Slack app
 
 1. api.slack.com/apps > **Create New App** > **From scratch**
-2. **OAuth & Permissions** > Bot Token Scopes, add exactly these four:
-   `chat:write`, `im:write`, `users:read`, `users:read.email`
+2. **OAuth & Permissions** > Bot Token Scopes, add exactly these five:
+   `chat:write`, `im:write`, `im:history`, `users:read`, `users:read.email`
+
+   `im:history` is the one that's easy to miss: subscribing to the `message.im`
+   event requires it, and without it Slack accepts the subscription but never
+   delivers a reply — so "done" silently does nothing.
 3. **Install to Workspace**, then copy the **Bot User OAuth Token** (`xoxb-…`)
    into `SLACK_BOT_TOKEN`
 4. **Basic Information** > App Credentials > copy the **Signing Secret** into
