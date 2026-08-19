@@ -766,6 +766,37 @@ test('a subtask can be handed to a teammate, and reaches them', async ({ page, b
   await expect(page.getByText('Build HIRI Pulse Member edition')).toBeVisible()
 })
 
+test('closing a task in the app records who closed it and how', async ({ page }) => {
+  test.skip(
+    !(await trackerReady()),
+    'completed_at column missing — run supabase-weekly-tracker.sql in the Supabase SQL editor',
+  )
+
+  await seedAndLogin(page, `viaapp+${Date.now()}@example.com`, 'Password123!', 'Via App Tester')
+  await page.goto('/tasks')
+
+  await page.getByPlaceholder('What needs doing?').fill('Close this one from the board')
+  await page.getByRole('button', { name: /Add & Notify/ }).click()
+  const row = page.getByTestId('task-row').filter({ hasText: 'Close this one from the board' })
+  await expect(row).toBeVisible({ timeout: 15000 })
+
+  await row.getByTitle('Mark as done').click()
+
+  // The board, the Slack redraw and the metrics all read completed_via, and every
+  // one of them had nothing to read after an in-app close: the badge is the visible
+  // half of that, so it is what this asserts.
+  await expect(page.getByText('in the app by Via App Tester')).toBeVisible({ timeout: 15000 })
+
+  // Survives a reload, so it is on the row and not only in local state.
+  await page.reload()
+  await expect(page.getByText('in the app by Via App Tester')).toBeVisible({ timeout: 15000 })
+
+  // Reopening clears it rather than leaving a stale "closed by" on an open task.
+  await page.getByTestId('task-row').filter({ hasText: 'Close this one from the board' })
+    .getByTitle('Mark as open').click()
+  await expect(page.getByText('in the app by Via App Tester')).toHaveCount(0)
+})
+
 test('a task carries notes, and they can be added or changed afterwards', async ({ page }) => {
   test.skip(
     !(await trackerReady()),

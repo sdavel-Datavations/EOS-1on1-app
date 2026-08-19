@@ -600,15 +600,31 @@ function noticeAssignerOfClose(id: string) {
   }).catch(() => {})
 }
 
+/** The signed-in user, for stamping who did something. Null if the session is gone. */
+async function currentUserId(): Promise<string | null> {
+  const { data: { user } } = await getSupabase().auth.getUser()
+  return user?.id ?? null
+}
+
 export async function setCommitmentStatus(id: string, status: 'open' | 'done') {
+  const done = status === 'done'
+  // Who and how, the same as the Slack and email surfaces record. 'app' is the
+  // value the schema has always named for this; nothing was writing it, so a task
+  // closed here showed no badge on the board, made the Slack redraw say a bare
+  // "Closed" with nobody's name on it, and counted as "unrecorded" in the metrics.
   const result = await updateCommitment(id, {
     status,
-    completed_at: status === 'done' ? new Date().toISOString() : null,
+    completed_at: done ? new Date().toISOString() : null,
+    completed_by: done ? await currentUserId() : null,
+    completed_via: done ? 'app' : null,
   })
-  // Before supabase-weekly-tracker.sql runs there is no completed_at column.
-  // Ticking a box off is more important than recording when, so fall back to
-  // the status alone rather than failing the whole write.
-  if (result.error && isMissingColumn(result.error, 'completed_at')) {
+  // Before supabase-weekly-tracker.sql and supabase-notifications.sql run, these
+  // columns do not exist. Ticking a box off is more important than recording who
+  // and when, so fall back to the status alone rather than failing the whole write.
+  if (
+    result.error &&
+    ['completed_at', 'completed_by', 'completed_via'].some(c => isMissingColumn(result.error!, c))
+  ) {
     const fallback = await updateCommitment(id, { status })
     if (!fallback.error) {
       syncSlackMessage(id)

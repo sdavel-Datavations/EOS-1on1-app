@@ -81,6 +81,12 @@ only — a 1-on-1 commitment can be performance material.
 - **Reassignment** goes through `/api/tasks/reassign`, never a direct column write: the old
   owner's Slack DM has to be retired first, because its Mark done button closes by task id
   rather than by who pressed it.
+- **All four ways of closing a task record `completed_by` and `completed_via`.** The board's
+  checkbox recorded neither for a long time, and three features were quietly reading them: the
+  badge on the task row, the name in the Slack redraw's "Closed by … in the app", and the
+  closure-channel breakdown in `/metrics`, which said *unrecorded*. The column is free text on
+  purpose — a new surface should not need a migration to say how it closed something — so the
+  cost of forgetting is silence rather than an error. Reopening clears both.
 - **The assigner hears once when a task is closed** — a quiet DM, no button, skipped when
   you close your own task, which is most of them. `closeNoticeDecision()` holds the rules and
   `punctualityLabel()` reuses `punctualityOf()` from the metrics, so a DM cannot disagree with
