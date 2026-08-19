@@ -30,23 +30,21 @@ There is no Anthropic key and no LLM dependency.
 2. **The Slack "Mark done" button works** — confirmed `[slack/complete/ok] closed via
    slack_button` — but the message-redraw fix deployed *after* that click. Press it again on
    the old message; it now self-heals.
-3. **Email had a doubled `@`** in `NOTIFY_FROM_EMAIL`
-   (`noreply@@marketing.task.datavations.com`), which is why nothing had ever sent. Fixed in
-   Vercel on 2026-08-18 and redeployed; the first successful send is still unconfirmed.
-   Found in `notification_log`, which named the offending value outright — Resend's own
-   message is a generic `Invalid from field` that names nothing, so the typo was invisible
-   both on screen and in the logs.
-   To confirm: create a task with Email ticked, then look for a
-   `channel=email status=sent` row in `notification_log`. If it fails there, the next
-   suspect is the sending domain not being verified in Resend.
-   Note `RESEND_API_KEY` and `NOTIFY_FROM_EMAIL` are **not** in `.env.local`, so email never
-   sends on localhost regardless — test this on the deployed app.
+3. ~~**Email**~~ — **working as of 2026-08-19.** Confirmed end to end: a real send returned
+   `{slack: "sent", email: "sent"}` with a `channel=email status=sent` row in
+   `notification_log`. Two causes, fixed in order: a doubled `@` in `NOTIFY_FROM_EMAIL`
+   (`noreply@@marketing.task.datavations.com`), then the sending domain not being verified in
+   Resend. The DNS was already correct — MX to `feedback-smtp.us-east-1.amazonses.com`, SPF,
+   and the `resend._domainkey` DKIM record all present on `marketing.task.datavations.com`;
+   what was missing was verification on the Resend side.
+   Note `RESEND_API_KEY` and `NOTIFY_FROM_EMAIL` are **not** in `.env.local`, so email still
+   never sends on localhost — test it on the deployed app.
 4. **No meetings exist**, so the agenda, Rocks, and Import Next Steps have never run against
    real data.
 
 ## Next steps, in order
 
-1. Slack Messages Tab on → prove the reply path.
+1. Slack Messages Tab on → prove the reply path. **This is now the only unproven channel.**
 2. Invite Ashley at `/team` — her email, manager Sam, department Marketing. Signup is
    invite-only; she cannot register without this.
 3. Create the first real meeting, her email in Direct Report.
