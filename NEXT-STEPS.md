@@ -23,23 +23,23 @@ that notices when a week gets skipped.
 |---|---|
 | Email notifications | **Working.** 4 successful sends. Two bugs fixed to get there: a doubled `@` in `NOTIFY_FROM_EMAIL`, then an unverified Resend domain. |
 | Slack DM + **Mark done button** | **Working.** Confirmed `closed via slack_button`. |
-| Slack **reply “done”** | **Never once.** 0 tasks have `completed_via = 'slack_reply'`. Blocked in Slack → App Home → Show Tabs: the Messages Tab toggle only shows the tab, and the **checkbox under it** — *Allow users to send Slash commands and messages* — is the permission to type. |
+| Slack **reply “done”** | **Working**, as of 2026-08-19. It had never fired once, and the cause was Slack-side: App Home → Show Tabs → Messages Tab. The toggle only shows the tab; the **checkbox under it** — *Allow users to send Slash commands and messages* — is the permission to type, and it stays clear when you flip the toggle. |
 | Nightly cron | **Never observed.** 0 heartbeat rows. One should appear the first weekday after a deploy, at 13:00 UTC. Watch the Delivery panel on `/metrics`. |
 | Assigner confirmation DM | **Never fired.** Needs a creator and assignee who are different people, both on Slack. |
+| **Close notice to the assigner** | **Never fired**, same reason. Unit-tested, but no close has yet had a different assigner and closer. |
 | Metrics dashboard | **Proven** against seeded data with a manager and a report; figures checked by hand. |
 | Cadence / skipped weeks | **Proven** against seeded data. |
 | Anything multi-person | **Only ever run with synthetic test accounts.** |
 
 ## Next steps, in order
 
-1. **Slack Messages Tab on, and its checkbox ticked** → reply `done` and confirm
-   `completed_via = 'slack_reply'`.
-2. **Invite Ashley** at `/team` — email, department Marketing, manager Sam. Signup is
-   invite-only. This converts a dozen built-but-never-run features into working or broken.
-3. **Set a schedule** for her on `/team`, then hold the first real 1-on-1 — with her email in
+1. **Invite Ashley** at `/team` — email, department Marketing, manager Sam. Signup is
+   invite-only. This converts a dozen built-but-never-run features into working or broken,
+   including both assigner DMs, which cannot fire until two real people are involved.
+2. **Set a schedule** for her on `/team`, then hold the first real 1-on-1 — with her email in
    Direct Report, or the cadence panel counts it missed (see below).
-4. **Add a Q3 Rock** for her; confirm it appears in the *next* meeting without being copied.
-5. **Watch `/metrics` → Delivery** for the first cron heartbeat.
+3. **Add a Q3 Rock** for her; confirm it appears in the *next* meeting without being copied.
+4. **Watch `/metrics` → Delivery** for the first cron heartbeat.
 
 ## Env vars in Vercel
 
@@ -81,6 +81,13 @@ only — a 1-on-1 commitment can be performance material.
 - **Reassignment** goes through `/api/tasks/reassign`, never a direct column write: the old
   owner's Slack DM has to be retired first, because its Mark done button closes by task id
   rather than by who pressed it.
+- **The assigner hears once when a task is closed** — a quiet DM, no button, skipped when
+  you close your own task, which is most of them. `closeNoticeDecision()` holds the rules and
+  `punctualityLabel()` reuses `punctualityOf()` from the metrics, so a DM cannot disagree with
+  the dashboard about whether something was late. Deduped on a `notification_log` row, so
+  reopening and re-closing does not repeat it. The three out-of-app surfaces send it from
+  `completeTask`; the board's checkbox is a plain RLS update with no service role in the path,
+  so it calls `/api/tasks/close-notice` separately rather than move that write server-side.
 - **An orphaned subtask must never disappear.** Hand someone one piece of a task whose parent
   RLS hides, and that row is neither top-level nor drawn by a parent. `isTopLevel()` in
   `src/lib/open-work.ts` is the single rule, used by the task board and the agenda alike.

@@ -533,6 +533,35 @@ test('a department sees each others shared tasks but not private 1-on-1 commitme
   await carolCtx.close()
 })
 
+test('the close-notice endpoint refuses callers without access', async ({ page, request }) => {
+  // Same shape as the sync endpoint below, and for the same reason: it acts with
+  // the service role, so it proves the caller may see the task through their own
+  // client first. Without that check it would answer "does this id exist?" for
+  // anyone with a session.
+  const anon = await request.post(`${baseUrl()}/api/tasks/close-notice`, {
+    data: { commitment_id: '00000000-0000-0000-0000-000000000000' },
+  })
+  expect(anon.status()).toBe(401)
+
+  const email = `notice+${Date.now()}@example.com`
+  await seedAndLogin(page, email, 'Password123!', 'Notice Tester')
+  const cookies = await page.context().cookies()
+  const cookie = cookies.map(c => `${c.name}=${c.value}`).join('; ')
+
+  const foreign = await request.post(`${baseUrl()}/api/tasks/close-notice`, {
+    headers: { cookie },
+    data: { commitment_id: '00000000-0000-0000-0000-000000000000' },
+  })
+  expect(foreign.status()).toBe(403)
+  expect((await foreign.json()).error).toContain('No access')
+
+  const missing = await request.post(`${baseUrl()}/api/tasks/close-notice`, {
+    headers: { cookie },
+    data: {},
+  })
+  expect(missing.status()).toBe(400)
+})
+
 test('the slack sync endpoint refuses callers without access', async ({ page, request }) => {
   // It reaches Slack with the service role, so the caller's authority is
   // established first through their own client — RLS decides, not the handler.

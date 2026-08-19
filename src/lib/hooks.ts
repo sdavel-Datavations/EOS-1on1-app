@@ -585,6 +585,21 @@ function syncSlackMessage(id: string) {
   }).catch(() => {})
 }
 
+/**
+ * Tells the assigner their task is done.
+ *
+ * Fire-and-forget, like the Slack redraw beside it: the task is closed either way,
+ * and a checkbox should not wait on a DM. The server decides whether to send at
+ * all — closing your own task sends nothing.
+ */
+function noticeAssignerOfClose(id: string) {
+  void fetch('/api/tasks/close-notice', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ commitment_id: id }),
+  }).catch(() => {})
+}
+
 export async function setCommitmentStatus(id: string, status: 'open' | 'done') {
   const result = await updateCommitment(id, {
     status,
@@ -595,11 +610,18 @@ export async function setCommitmentStatus(id: string, status: 'open' | 'done') {
   // the status alone rather than failing the whole write.
   if (result.error && isMissingColumn(result.error, 'completed_at')) {
     const fallback = await updateCommitment(id, { status })
-    if (!fallback.error) syncSlackMessage(id)
+    if (!fallback.error) {
+      syncSlackMessage(id)
+      if (status === 'done') noticeAssignerOfClose(id)
+    }
     return fallback
   }
   // Slack has to agree with the app, or somebody presses a dead button.
-  if (!result.error) syncSlackMessage(id)
+  if (!result.error) {
+    syncSlackMessage(id)
+    // Reopening is not news, and the notice is once per task in any case.
+    if (status === 'done') noticeAssignerOfClose(id)
+  }
   return result
 }
 

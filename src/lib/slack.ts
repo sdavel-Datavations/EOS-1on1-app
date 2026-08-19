@@ -275,6 +275,45 @@ export function assignerConfirmationBlocks(args: {
   }
 }
 
+/**
+ * The other end of the loop: your task got closed.
+ *
+ * A context block, like the confirmation on the way out — grey, small, and
+ * carrying no button, because there is nothing for the assigner to do. Anything
+ * louder and the person who assigns the most work gets the most interruptions,
+ * which is backwards.
+ */
+export function closeNoticeBlocks(args: {
+  title: string
+  closerName: string
+  /** Formatted date, or null for an undated task. */
+  dueLabel?: string | null
+  /** From punctualityLabel(): "closed on time", "closed late", or null. */
+  punctuality?: string | null
+}): { text: string; blocks: unknown[] } {
+  const title = clip(args.title, 120)
+  const text = `${args.closerName} closed \u201c${title}\u201d`
+  const meta = [
+    args.dueLabel ? `due ${args.dueLabel}` : null,
+    args.punctuality,
+  ].filter(Boolean).join(' \u00b7 ')
+  return {
+    text,
+    blocks: [
+      {
+        type: 'context',
+        elements: [{
+          type: 'mrkdwn',
+          // Second line only when there is something to say. An undated task has
+          // no deadline to report and no punctuality to judge, so it stays one line.
+          text: `\u2705 *${escapeMrkdwn(args.closerName)}* closed *${escapeMrkdwn(title)}*` +
+            (meta ? `\n${escapeMrkdwn(meta)}` : ''),
+        }],
+      },
+    ],
+  }
+}
+
 /** Reopened in the app: the button comes back, because it works again. */
 export function reopenedBlocks(args: {
   title: string

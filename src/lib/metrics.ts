@@ -34,7 +34,11 @@ export type Punctuality = 'on_time' | 'late' | 'no_due_date'
  * flatters everyone and would make the headline number meaningless, since most
  * tasks can be created without a date at all.
  */
-export function punctualityOf(task: MetricTask): Punctuality | null {
+// Narrowed to the three fields it reads, so a caller holding only part of a task —
+// the close notice, for one — can ask the same question without inventing the rest.
+export function punctualityOf(
+  task: Pick<MetricTask, 'status' | 'due_date' | 'completed_at'>,
+): Punctuality | null {
   if (task.status !== 'done') return null
   if (!task.due_date) return 'no_due_date'
   if (!task.completed_at) return 'no_due_date'

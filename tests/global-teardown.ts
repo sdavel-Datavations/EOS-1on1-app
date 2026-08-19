@@ -40,7 +40,31 @@ export default async function globalTeardown() {
   const chunks = <T,>(a: T[], n: number): T[][] =>
     a.length ? [a.slice(0, n), ...chunks(a.slice(n), n)] : []
 
-  // Meetings first: their FK to profiles has no ON DELETE, so a user cannot be
+  /*
+   * notification_log before the rows it points at.
+   *
+   * Its FKs are ON DELETE SET NULL, not CASCADE — deliberately, so a real
+   * notification's history outlives the task it was about. The consequence for
+   * tests is that deleting the task first leaves a row with both keys null, which
+   * no later run can recognise as test data. Every run had been adding a few.
+   *
+   * commitment_events needs no such care: it cascades.
+   */
+  let logRows = 0
+  for (const c of chunks(ids, 100)) {
+    const people = `assignee_id.in.(${c.join(',')}),creator_id.in.(${c.join(',')})`
+    const { data: comms } = await sb.from('weekly_commitments').select('id').or(people)
+    for (const cc of chunks((comms || []).map(r => r.id as string), 100)) {
+      const { data: gone } = await sb
+        .from('notification_log').delete().in('commitment_id', cc).select('id')
+      logRows += gone?.length || 0
+    }
+    const { data: byUser } = await sb
+      .from('notification_log').delete().in('user_id', c).select('id')
+    logRows += byUser?.length || 0
+  }
+
+  // Meetings next: their FK to profiles has no ON DELETE, so a user cannot be
   // removed while a meeting still references them. Child rows cascade off the
   // meeting.
   for (const c of chunks(ids, 100)) {
@@ -71,6 +95,7 @@ export default async function globalTeardown() {
   // eslint-disable-next-line no-console
   console.log(
     `\n[teardown] removed ${ids.length} test account(s) and their data` +
+    (logRows ? `, ${logRows} notification log row(s)` : '') +
     (strayInvites?.length ? `, plus ${strayInvites.length} unused invitation(s)` : ''),
   )
 }

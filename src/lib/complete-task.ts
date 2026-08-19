@@ -1,6 +1,10 @@
 import { createClient as createServiceClient, type SupabaseClient } from '@supabase/supabase-js'
-import { updateMessage, closedBlocks, reopenedBlocks, slackConfigured } from './slack'
+import {
+  updateMessage, closedBlocks, reopenedBlocks, closeNoticeBlocks, postMessage, slackConfigured,
+} from './slack'
 import { describeDue } from './tracker'
+import { closeNoticeDecision, punctualityLabel } from './close-notice'
+import { formatDueDate } from './mail'
 
 /**
  * Closing a task from outside the app.
@@ -284,5 +288,98 @@ export async function completeTask(
   // One place for this, so all four surfaces leave Slack in the same state.
   await syncSlackMessage(sb, task.id)
 
+  // Only on the write that actually closed it. A Slack retry or a second click
+  // arrives here with alreadyDone set, and the assigner should hear once.
+  if (!alreadyDone) await notifyAssignerOfClose(sb, task.id, actorId)
+
   return { ok: true, alreadyDone, title: task.title }
+}
+
+/** Marks the one log line that means "the assigner has been told about this close". */
+export const ASSIGNER_NOTICE = 'assigner notified of close'
+
+/**
+ * Tells whoever assigned a task that it is done.
+ *
+ * Reads the row again rather than trusting the caller's copy, because the closing
+ * write is what set completed_at, and the notice reports on time or late from it.
+ *
+ * Never throws and never blocks: a task is closed whether or not a DM lands, and
+ * every outcome — including each reason for staying quiet — goes to
+ * notification_log, so silence can be explained afterwards.
+ */
+export async function notifyAssignerOfClose(
+  sb: SupabaseClient,
+  taskId: string,
+  actorId: string,
+): Promise<{ sent: boolean; reason?: string }> {
+  try {
+    const { data: row } = await sb
+      .from('weekly_commitments')
+      .select('id, title, status, creator_id, due_date, completed_at')
+      .eq('id', taskId)
+      .maybeSingle()
+    if (!row) return { sent: false, reason: 'task not found' }
+
+    const decision = closeNoticeDecision(row, actorId)
+    if (!decision.notify) return { sent: false, reason: decision.reason }
+
+    // One notice per task, ever. Reopening and re-closing is a normal correction,
+    // and it should not put the same line in front of the assigner twice.
+    const { data: already } = await sb
+      .from('notification_log')
+      .select('id')
+      .eq('commitment_id', taskId)
+      .eq('detail', ASSIGNER_NOTICE)
+      .limit(1)
+    if (already && already.length > 0) return { sent: false, reason: 'already notified' }
+
+    if (!slackConfigured()) {
+      await logNotification(sb, {
+        commitment_id: taskId, user_id: decision.creatorId, channel: 'slack',
+        event: 'complete', status: 'skipped', detail: 'no Slack credentials on the server',
+      })
+      return { sent: false, reason: 'Slack is not configured' }
+    }
+
+    const { data: people } = await sb
+      .from('profiles')
+      .select('id, full_name, slack_user_id')
+      .in('id', [decision.creatorId, actorId])
+    const assigner = (people || []).find(p => p.id === decision.creatorId)
+    const closer = (people || []).find(p => p.id === actorId)
+
+    if (!assigner?.slack_user_id) {
+      await logNotification(sb, {
+        commitment_id: taskId, user_id: decision.creatorId, channel: 'slack',
+        event: 'complete', status: 'skipped', detail: 'assigner has no Slack account linked',
+      })
+      return { sent: false, reason: 'the assigner has no Slack account linked' }
+    }
+
+    const { text, blocks } = closeNoticeBlocks({
+      title: row.title as string,
+      closerName: closer?.full_name || 'Someone',
+      dueLabel: row.due_date ? formatDueDate(row.due_date as string) : null,
+      punctuality: punctualityLabel(row),
+    })
+
+    // A user id as the channel opens a DM, so this reaches the assigner and
+    // nobody else.
+    const res = await postMessage({ channel: assigner.slack_user_id as string, text, blocks })
+    const sent = !res.error
+    await logNotification(sb, {
+      commitment_id: taskId,
+      user_id: decision.creatorId,
+      channel: 'slack',
+      event: 'complete',
+      status: sent ? 'sent' : 'failed',
+      // Only the success case carries ASSIGNER_NOTICE exactly, so the dedupe check
+      // above does not treat a failed attempt as one already delivered.
+      detail: sent ? ASSIGNER_NOTICE : `assigner notice failed: ${res.error}`,
+    })
+    return { sent, reason: res.error }
+  } catch (err) {
+    return { sent: false, reason: err instanceof Error ? err.message : 'unknown' }
+  }
 }
