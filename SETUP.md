@@ -104,8 +104,19 @@ Optional. Skip and the app works, minus the reminders.
    Slack sends a one-time `url_verification` challenge; the route answers it, but
    only after checking the signature — so the signing secret must be set first or
    verification fails. Then under **Subscribe to bot events** add `message.im`.
-6. **Interactivity & Shortcuts** > on. Request URL:
+6. **App Home** > Show Tabs > **Messages Tab** on, and tick *Allow users to send
+   Slash commands and messages from the messages tab*.
+
+   Without this Slack refuses to let anyone type in the DM at all — the thread
+   shows "Sending messages to this app has been turned off" and the reply never
+   reaches step 5's subscription. Nothing in the app or its logs can tell you
+   this; the message only appears in Slack.
+7. **Interactivity & Shortcuts** > on. Request URL:
    `https://YOUR-DOMAIN/api/slack/interactive`
+
+   This is a separate endpoint from step 5. The **Mark done button working proves
+   nothing about replies**, and vice versa — they arrive through different
+   subscriptions and either can be configured without the other.
 
 Every inbound Slack request is HMAC-verified against the signing secret, with a
 five-minute replay window. These endpoints act with the service role and have no
