@@ -7,7 +7,7 @@ import { SECTIONS, ROCK_STATUS_LABEL } from '@/lib/types'
 import { quarterOf, quarterLabel, selectableQuarters } from '@/lib/quarters'
 import { todayISO, describeDue } from '@/lib/tracker'
 import { isOverdue, sourceLabel, countRows, type OpenWorkItem } from '@/lib/open-work'
-import type { ScorecardItem, Issue, Todo, SegueNote, Headline, SectionTimer, ParticipantRole, ExtractedItem, Rock, RockStatus } from '@/lib/types'
+import type { ScorecardItem, Issue, Todo, SegueNote, Headline, SectionTimer, ParticipantRole, ExtractedItem, Rock, RockStatus, Commitment } from '@/lib/types'
 
 type Participant = {
   membershipId: string
@@ -1079,6 +1079,7 @@ function WeeklyCommitments({ meetingId, participants, currentUserId }: {
   const [notifySlack, setNotifySlack] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [showDone, setShowDone] = useState(false)
 
   // Default the assignee to the current user once the participant list resolves
   useEffect(() => {
@@ -1125,6 +1126,35 @@ function WeeklyCommitments({ meetingId, participants, currentUserId }: {
   }
 
   const problem = saveError || loadError
+  const openCommitments = commitments.filter(c => c.status !== 'done')
+  const doneCommitments = commitments.filter(c => c.status === 'done')
+
+  const row = (c: Commitment) => (
+    <div key={c.id} className="flex items-start gap-3 p-3 border border-light-gray rounded-lg">
+      <button
+        onClick={() => toggleDone(c.id, c.status)}
+        className={`w-6 h-6 mt-px rounded flex items-center justify-center text-xs border-2 flex-shrink-0 transition ${
+          c.status === 'done' ? 'bg-green border-green text-white' : 'border-light-gray text-transparent hover:border-green'
+        }`}
+        title={c.status === 'done' ? 'Mark as open' : 'Mark as done'}
+      >
+        ✓
+      </button>
+      <div className="flex-1 min-w-0">
+        <div className={`font-semibold text-sm ${c.status === 'done' ? 'line-through text-gray' : 'text-near-black'}`}>{c.title}</div>
+        <div className="text-xs text-gray">
+          {nameFor(c.assignee_id)} · Due {c.due_date || '—'}
+          {c.notify_email && <span> · email</span>}
+          {c.notify_slack && <span> · slack</span>}
+        </div>
+        {(c.description || '').trim() && (
+          <div className="mt-1 text-xs text-near-black whitespace-pre-wrap border-l-2 border-light-gray pl-2">
+            {c.description!.trim()}
+          </div>
+        )}
+      </div>
+    </div>
+  )
 
   return (
     <div>
@@ -1136,33 +1166,25 @@ function WeeklyCommitments({ meetingId, participants, currentUserId }: {
           <p className="text-sm text-gray">Loading commitments...</p>
         ) : commitments.length === 0 ? (
           <p className="text-sm text-light-gray italic">No commitments yet.</p>
-        ) : commitments.map(c => (
-          <div key={c.id} className="flex items-center gap-3 p-3 border border-light-gray rounded-lg">
-            <button
-              onClick={() => toggleDone(c.id, c.status)}
-              className={`w-6 h-6 rounded flex items-center justify-center text-xs border-2 flex-shrink-0 transition ${
-                c.status === 'done' ? 'bg-green border-green text-white' : 'border-light-gray text-transparent hover:border-green'
-              }`}
-              title={c.status === 'done' ? 'Mark as open' : 'Mark as done'}
-            >
-              ✓
-            </button>
-            <div className="flex-1 min-w-0">
-              <div className={`font-semibold text-sm ${c.status === 'done' ? 'line-through text-gray' : 'text-near-black'}`}>{c.title}</div>
-              <div className="text-xs text-gray">
-                {nameFor(c.assignee_id)} · Due {c.due_date || '—'}
-                {c.notify_email && <span> · email</span>}
-                {c.notify_slack && <span> · slack</span>}
-              </div>
-              {(c.description || '').trim() && (
-                <div className="mt-1 text-xs text-near-black whitespace-pre-wrap border-l-2 border-light-gray pl-2">
-                  {c.description.trim()}
-                </div>
-              )}
-            </div>
-          </div>
-        ))}
+        ) : openCommitments.length === 0 ? (
+          <p className="text-sm text-gray">Everything raised here is done.</p>
+        ) : openCommitments.map(row)}
       </div>
+
+      {/* Closed ones drop out of the list but not out of the record. A 1-on-1 is
+          partly a review of what got finished, so hiding them entirely would lose
+          the half of the conversation that went well. */}
+      {doneCommitments.length > 0 && (
+        <div className="mb-4">
+          <button
+            onClick={() => setShowDone(!showDone)}
+            className="text-[11px] font-bold uppercase tracking-wide text-green hover:text-[#2d8a47] transition"
+          >
+            {showDone ? '▾' : '▸'} Done · {doneCommitments.length}
+          </button>
+          {showDone && <div className="space-y-2 mt-2">{doneCommitments.map(row)}</div>}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
         <input

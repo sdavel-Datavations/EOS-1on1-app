@@ -529,6 +529,16 @@ export async function createStandaloneCommitment(item: {
  * Fire-and-forget: the task is already updated, and Slack being briefly stale is
  * better than blocking the checkbox on a network round trip.
  */
+/**
+ * Redraws a task's Slack message from the row.
+ *
+ * Exported because changing a due date has to reach whoever holds the task, and
+ * updating the message they already have is quieter than sending another one.
+ */
+export function syncTaskSlackMessage(id: string) {
+  return syncSlackMessage(id)
+}
+
 function syncSlackMessage(id: string) {
   void fetch('/api/slack/sync', {
     method: 'POST',
@@ -783,6 +793,32 @@ export function useTeammates(userId: string | undefined) {
  * assignee, the creator, or someone in the task's meeting may delete it, and
  * departmental or oversight viewers explicitly may not.
  */
+/**
+ * Hands a task to someone else, then tells them.
+ *
+ * Goes through a route rather than writing the column directly: the previous
+ * owner's Slack message has to be retired, and that needs the service role. See
+ * src/app/api/tasks/reassign/route.ts.
+ */
+export async function reassignCommitment(id: string, assigneeId: string): Promise<{
+  error: string | null
+  unchanged?: boolean
+  toName?: string
+}> {
+  try {
+    const res = await fetch('/api/tasks/reassign', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ commitment_id: id, assignee_id: assigneeId }),
+    })
+    const json = await res.json().catch(() => ({}))
+    if (!res.ok) return { error: json.error || 'Could not reassign that task.' }
+    return { error: null, unchanged: json.unchanged, toName: json.toName }
+  } catch {
+    return { error: 'Could not reach the server to reassign that task.' }
+  }
+}
+
 export async function deleteCommitment(id: string) {
   const { data, error } = await getSupabase()
     .from('weekly_commitments')

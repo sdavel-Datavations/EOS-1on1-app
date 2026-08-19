@@ -39,8 +39,11 @@ There is no Anthropic key and no LLM dependency.
    what was missing was verification on the Resend side.
    Note `RESEND_API_KEY` and `NOTIFY_FROM_EMAIL` are **not** in `.env.local`, so email still
    never sends on localhost — test it on the deployed app.
-4. **No meetings exist**, so the agenda, Rocks, and Import Next Steps have never run against
-   real data.
+4. **The agenda, Rocks and Import Next Steps have never run against real data.** One solo
+   meeting exists (no report), zero Rocks, zero issues, zero to-dos.
+5. **The assigner confirmation DM has never fired.** It needs a creator and an assignee who are
+   different people and both on Slack, and only one real account exists. It will first run when
+   Sam assigns Ashley something.
 
 ## Next steps, in order
 
@@ -105,6 +108,22 @@ There is no Anthropic key and no LLM dependency.
 - Rocks live in `rocks`, keyed by (owner_id, quarter), and are **read** by every agenda in
   that quarter rather than copied into it. `rock_checkins` holds the weekly pulse, unique per
   (rock, meeting).
+- **Reassigning a task** goes through `/api/tasks/reassign`, not a direct column write. The
+  previous owner's Slack DM has to be retired first: its Mark done button closes by commitment
+  id rather than by who pressed it, so a live button in the old owner's DM lets them close work
+  that is no longer theirs. The route also clears `notified_at` and the Slack pointers so the
+  new owner is actually told and a "done" reply lands on the new thread.
+- **A changed due date redraws the existing Slack message** rather than sending a second DM
+  about the same task — `reopenedBlocks` carries the current due label for exactly this.
+- **Subtasks have their own due dates**, pre-filled from the parent but independent, because
+  work runs in stages and a piece waiting on someone else is rarely due when the whole is.
+- **A quiet confirmation DM goes to whoever handed out a task**, once the assignee's DM has
+  actually landed, and only when it went to someone else. No button, no thread — a courtesy
+  note, not a second stream to keep up with. Failures are logged and swallowed: the assignee
+  has the task either way.
+- **Finished commitments drop off the meeting's open list** into a collapsed `Done · N`
+  section. Not deleted from view entirely — a 1-on-1 is partly a review of what got finished.
+  Open Work already excluded done tasks by construction.
 - **Notes and context** live in the existing `weekly_commitments.description` column, so no
   migration was needed. Set them when creating a task, or add and edit them in place on any
   row. They travel with the task into the Slack DM and the email — context that stays in the

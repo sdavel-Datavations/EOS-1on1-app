@@ -1,5 +1,6 @@
 import { test, expect, Page } from '@playwright/test'
 import { seedAndLogin, createUser, invite, invitationsReady, login, baseUrl, tableExists, commitmentsTableExists, participantsTableExists, trackerReady, subtasksReady } from './playwright-auth'
+import { describeDue, todayISO } from '../src/lib/tracker'
 
 async function signInAndStartMeeting(page: Page, name = 'E2E User') {
   const email = `e2e+${Date.now()}@example.com`
@@ -148,12 +149,17 @@ test('weekly commitments save through RLS', async ({ page }) => {
   // assignee renders as a name, not a raw UUID
   await expect(page.getByText(`${name} · Due —`)).toBeVisible()
 
-  // Toggling done persists. Wait for the toggle to land before reloading —
-  // reloading mid-PATCH aborts the request and tests nothing.
+  // Toggling done persists. A finished commitment now drops off the open list into
+  // a collapsed section, so the count is what proves it landed — and waiting for
+  // that before reloading matters, since reloading mid-PATCH tests nothing.
   await page.getByTitle('Mark as done').click()
-  await expect(page.getByTitle('Mark as open')).toBeVisible({ timeout: 10000 })
+  await expect(page.getByText(/Done · 1/)).toBeVisible({ timeout: 10000 })
   await page.reload()
-  await expect(page.getByTitle('Mark as open')).toBeVisible({ timeout: 10000 })
+  await expect(page.getByText(/Done · 1/)).toBeVisible({ timeout: 10000 })
+
+  // Reopening from that section still works, so nothing is stranded there
+  await page.getByRole('button', { name: /Done · 1/ }).click()
+  await expect(page.getByTitle('Mark as open')).toBeVisible()
 })
 
 test('the tasks page holds mid-week tasks and commitments from meetings alike', async ({ page }) => {
@@ -853,4 +859,123 @@ test('a task can be deleted, and a main task takes its subtasks with it', async 
   await expect(rowFor('Ship the survey screen')).toHaveCount(0)
   // and the untouched one is still there, so the cascade was scoped
   await expect(rowFor('Keep this one')).toHaveCount(1)
+})
+
+test('a task can be handed to someone else after the fact', async ({ page, browser }) => {
+  test.skip(
+    !(await trackerReady()),
+    'completed_at column missing — run supabase-weekly-tracker.sql in the Supabase SQL editor',
+  )
+
+  const mateEmail = `reassign+${Date.now()}@example.com`
+  const matePassword = 'Password123!'
+  await invite(mateEmail)
+  await createUser(mateEmail, matePassword, 'New Owner')
+
+  // Sharing a meeting is what puts someone in the owner dropdown
+  await signInAndStartMeeting(page, 'First Owner')
+  await page.getByPlaceholder('Add participant email').fill(mateEmail)
+  await page.getByRole('button', { name: 'Add', exact: true }).click()
+  await expect(page.getByText('New Owner').first()).toBeVisible({ timeout: 10000 })
+
+  await page.goto('/tasks')
+  await page.getByPlaceholder('What needs doing?').fill('Chase the vendor invoice')
+  await page.getByRole('button', { name: /Add & Notify/ }).click()
+  await expect(page.getByText('Chase the vendor invoice')).toBeVisible({ timeout: 20000 })
+
+  const row = page.getByTestId('task-row').filter({ hasText: 'Chase the vendor invoice' })
+  await expect(row.getByText('You', { exact: false })).toBeVisible()
+
+  await row.getByRole('button', { name: 'Owner & date' }).click()
+  await row.getByLabel('Task owner').selectOption({ label: 'New Owner' })
+  await row.getByRole('button', { name: 'Save', exact: true }).click()
+
+  await expect(page.getByText(/Reassigned/)).toBeVisible({ timeout: 20000 })
+  // Still visible to the creator, but owned by someone else now
+  await page.reload()
+  const after = page.getByTestId('task-row').filter({ hasText: 'Chase the vendor invoice' })
+  await expect(after.getByText('New Owner')).toBeVisible({ timeout: 15000 })
+
+  // And it is genuinely theirs, not just labelled so
+  const ctx = await browser.newContext()
+  const matePage = await ctx.newPage()
+  await login(matePage, mateEmail, matePassword)
+  await matePage.goto('/tasks')
+  await expect(matePage.getByText('Chase the vendor invoice')).toBeVisible({ timeout: 15000 })
+  await matePage.getByRole('button', { name: 'Mine to do' }).click()
+  await expect(matePage.getByText('Chase the vendor invoice')).toBeVisible()
+  await ctx.close()
+})
+
+test('a subtask keeps its own due date, not the parent’s', async ({ page }) => {
+  test.skip(
+    !(await subtasksReady()),
+    'parent_id column missing — run supabase-subtasks.sql in the Supabase SQL editor',
+  )
+
+  const plus = (days: number) => {
+    const [y, m, d] = todayISO().split('-').map(Number)
+    const dt = new Date(Date.UTC(y, m - 1, d))
+    dt.setUTCDate(dt.getUTCDate() + days)
+    return dt.toISOString().slice(0, 10)
+  }
+  const parentDue = plus(30)
+  const subDue = plus(3)
+
+  await seedAndLogin(page, `stages+${Date.now()}@example.com`, 'Password123!', 'Stages Tester')
+  await page.goto('/tasks')
+
+  await page.getByPlaceholder('What needs doing?').fill('Build the member edition')
+  await page.locator('input[type="date"]').first().fill(parentDue)
+  await page.getByRole('button', { name: /Add & Notify/ }).click()
+  await expect(page.getByText('Build the member edition')).toBeVisible({ timeout: 20000 })
+
+  const group = page.getByTestId('task-group').filter({ hasText: 'Build the member edition' })
+  await group.getByRole('button', { name: '+ Subtask' }).click()
+
+  // Pre-filled from the parent, which is the sensible default...
+  await expect(group.getByLabel('Subtask due date')).toHaveValue(parentDue)
+  // ...but a piece waiting on someone else is due earlier than the whole
+  await group.getByLabel('Subtask due date').fill(subDue)
+  await group.getByPlaceholder("What's the next piece of this?").fill('Wire the auth flow')
+  await group.getByRole('button', { name: 'Add', exact: true }).click()
+  await expect(group.getByText('Wire the auth flow')).toBeVisible({ timeout: 15000 })
+
+  await page.reload()
+  await expect(page.getByRole('button', { name: /0 of 1 done/ })).toBeVisible({ timeout: 15000 })
+  await page.getByRole('button', { name: /0 of 1 done/ }).click()
+
+  const parentRow = page.getByTestId('task-row').filter({ hasText: 'Build the member edition' })
+  const subRow = page.getByTestId('task-row').filter({ hasText: 'Wire the auth flow' })
+  await expect(parentRow.getByText(describeDue(parentDue))).toBeVisible()
+  await expect(subRow.getByText(describeDue(subDue))).toBeVisible()
+  expect(describeDue(parentDue)).not.toBe(describeDue(subDue))
+})
+
+test('a finished commitment drops off the meeting’s open list', async ({ page }) => {
+  test.skip(
+    !(await commitmentsTableExists()),
+    'weekly_commitments table missing — run supabase-commitments.sql in the Supabase SQL editor',
+  )
+
+  await signInAndStartMeeting(page, 'Wrap Tester')
+  await page.getByPlaceholder('Commitment title').fill('Send the Q3 scorecard')
+  await page.getByRole('button', { name: 'Add Commitment' }).click()
+  await expect(page.getByText('Send the Q3 scorecard')).toBeVisible({ timeout: 15000 })
+  await expect(page.getByText(/Done ·/)).toHaveCount(0)
+
+  await page.getByTitle('Mark as done').first().click()
+
+  // Off the open list, but not out of the record: a 1-on-1 is partly a review of
+  // what got finished.
+  await expect(page.getByText('Everything raised here is done.')).toBeVisible({ timeout: 15000 })
+  await expect(page.getByText('Send the Q3 scorecard')).toHaveCount(0)
+  await expect(page.getByText(/Done · 1/)).toBeVisible()
+
+  await page.getByRole('button', { name: /Done · 1/ }).click()
+  await expect(page.getByText('Send the Q3 scorecard')).toBeVisible()
+
+  await page.reload()
+  await expect(page.getByText('Everything raised here is done.')).toBeVisible({ timeout: 15000 })
+  await expect(page.getByText('Send the Q3 scorecard')).toHaveCount(0)
 })

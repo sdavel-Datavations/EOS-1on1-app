@@ -8,6 +8,8 @@ import {
   createStandaloneCommitment,
   updateCommitment,
   deleteCommitment,
+  reassignCommitment,
+  syncTaskSlackMessage,
   findProfileByEmail,
   setCommitmentStatus,
   notifyCommitment,
@@ -62,6 +64,7 @@ export default function TaskBoard({
   const [subtaskFor, setSubtaskFor] = useState<string | null>(null)
   const [subtaskTitle, setSubtaskTitle] = useState('')
   const [subtaskAssignee, setSubtaskAssignee] = useState(userId)
+  const [subtaskDue, setSubtaskDue] = useState('')
   const [openDone, setOpenDone] = useState<Set<DoneBucket>>(new Set(['week']))
   const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null)
 
@@ -201,9 +204,9 @@ export default function TaskBoard({
       creator_id: userId,
       assignee_id: owner,
       title: subtaskTitle.trim(),
-      // A piece of a task is due when the task is due, unless someone says
-      // otherwise on the task board.
-      due_date: parent.due_date,
+      // Pre-filled from the parent but its own from here: work runs in stages,
+      // and a piece waiting on someone else is rarely due when the whole is.
+      due_date: subtaskDue || null,
       parent_id: parent.id,
       notify_slack: handover && notifySlack,
       notify_email: handover && notifyEmail,
@@ -454,11 +457,15 @@ export default function TaskBoard({
                       setSubtaskFor(subtaskFor === c.id ? null : c.id)
                       setSubtaskTitle('')
                       setSubtaskAssignee(c.assignee_id || userId)
+                      setSubtaskDue(c.due_date || '')
                     }}
                     subtaskTitle={subtaskTitle}
                     onSubtaskTitle={setSubtaskTitle}
                     subtaskAssignee={subtaskAssignee}
                     onSubtaskAssignee={setSubtaskAssignee}
+                    subtaskDue={subtaskDue}
+                    onSubtaskDue={setSubtaskDue}
+                    onNotice={setNotice}
                     ownerOptions={ownerOptions}
                     onSubtaskAdd={() => addSubtask(c)}
                     orphaned={Boolean(c.parent_id)}
@@ -506,11 +513,15 @@ export default function TaskBoard({
                         setSubtaskFor(subtaskFor === c.id ? null : c.id)
                         setSubtaskTitle('')
                         setSubtaskAssignee(c.assignee_id || userId)
+                        setSubtaskDue(c.due_date || '')
                       }}
                       subtaskTitle={subtaskTitle}
                       onSubtaskTitle={setSubtaskTitle}
                       subtaskAssignee={subtaskAssignee}
                       onSubtaskAssignee={setSubtaskAssignee}
+                      subtaskDue={subtaskDue}
+                      onSubtaskDue={setSubtaskDue}
+                      onNotice={setNotice}
                       ownerOptions={ownerOptions}
                       onSubtaskAdd={() => addSubtask(c)}
                       orphaned={Boolean(c.parent_id)}
@@ -631,9 +642,144 @@ function TaskNotes({ c, canEdit, onSaved }: {
   )
 }
 
+/**
+ * Changing who owns a task and when it is due, after the fact.
+ *
+ * Both live behind one control because they are usually changed together: work
+ * moves to someone else because it is waiting on them, and the date moves with
+ * it. Reassigning goes through a route so the previous owner's Slack message can
+ * be retired — see src/app/api/tasks/reassign/route.ts.
+ */
+function RowFields({ c, canEdit, ownerOptions, onSaved, onNotice }: {
+  c: TrackedCommitment
+  canEdit: boolean
+  ownerOptions: { id: string; label: string }[]
+  onSaved: () => void
+  onNotice: (message: string) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [owner, setOwner] = useState(c.assignee_id)
+  const [due, setDue] = useState(c.due_date || '')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  if (!canEdit) return null
+
+  const start = () => {
+    // Read from the row each time it opens: the board refetches underneath, and a
+    // stale draft would silently write back an old owner or date.
+    setOwner(c.assignee_id)
+    setDue(c.due_date || '')
+    setError(null)
+    setEditing(true)
+  }
+
+  const save = async () => {
+    const dueChanged = (c.due_date || '') !== due
+    const ownerChanged = owner !== c.assignee_id
+    if (!dueChanged && !ownerChanged) {
+      setEditing(false)
+      return
+    }
+
+    setSaving(true)
+    setError(null)
+
+    // Date first. When both change, the notification the new owner receives should
+    // carry the date they are actually being held to, not the one they inherited.
+    if (dueChanged) {
+      const { error: failure } = await updateCommitment(c.id, { due_date: due || null })
+      if (failure) {
+        setError(describeCommitmentError(failure))
+        setSaving(false)
+        return
+      }
+    }
+
+    if (ownerChanged) {
+      const { error: failure, toName } = await reassignCommitment(c.id, owner)
+      if (failure) {
+        setError(failure)
+        setSaving(false)
+        return
+      }
+      const who = toName || 'them'
+      const { error: notifyError, summary } = await notifyCommitment(c.id)
+      onNotice(
+        notifyError
+          ? `Reassigned to ${who}, but not sent: ${notifyError}`
+          : `Reassigned. ${notifyNotice(summary, who)}`,
+      )
+    } else if (dueChanged) {
+      // Redraw the message they already have rather than sending a second one
+      // about the same task. Fire and forget: the date is already saved.
+      syncTaskSlackMessage(c.id)
+      onNotice('Due date updated.')
+    }
+
+    setEditing(false)
+    setSaving(false)
+    onSaved()
+  }
+
+  if (!editing) {
+    return (
+      <button
+        onClick={start}
+        className="text-[11px] font-bold uppercase tracking-wide text-gray hover:text-steel-blue transition"
+      >
+        Owner &amp; date
+      </button>
+    )
+  }
+
+  return (
+    <div className="flex items-center gap-2 flex-wrap mt-1">
+      <select
+        value={owner}
+        onChange={e => setOwner(e.target.value)}
+        aria-label="Task owner"
+        className="border border-light-gray rounded px-2 py-1 text-xs focus:border-steel-blue focus:outline-none"
+      >
+        {ownerOptions.map(o => (
+          <option key={o.id} value={o.id}>{o.label}</option>
+        ))}
+        {/* The current owner may not be in the list — they can be someone you no
+            longer share a meeting with. Without this the select would silently
+            show the first option and reassign on save. */}
+        {!ownerOptions.some(o => o.id === c.assignee_id) && (
+          <option value={c.assignee_id}>Current owner</option>
+        )}
+      </select>
+      <input
+        type="date"
+        value={due}
+        onChange={e => setDue(e.target.value)}
+        aria-label="Task due date"
+        className="border border-light-gray rounded px-2 py-1 text-xs focus:border-steel-blue focus:outline-none"
+      />
+      <button
+        onClick={save}
+        disabled={saving}
+        className="bg-steel-blue text-white font-semibold px-2.5 py-1 rounded text-[11px] hover:bg-[#25698f] transition disabled:opacity-50"
+      >
+        {saving ? 'Saving...' : 'Save'}
+      </button>
+      <button
+        onClick={() => { setEditing(false); setError(null) }}
+        className="text-[11px] font-bold uppercase tracking-wide text-gray hover:text-steel-blue transition"
+      >
+        Cancel
+      </button>
+      {error && <p className="text-[11px] text-coral-red w-full">{error}</p>}
+    </div>
+  )
+}
+
 function Row({
   c, today, nameFor, busy, notificationsReady, userId, onToggle, onResend, onSaved,
-  onDelete, confirmingDelete, onConfirmDelete, deleteAlsoRemoves = 0, flat, orphaned,
+  ownerOptions, onNotice, onDelete, confirmingDelete, onConfirmDelete,
+  deleteAlsoRemoves = 0, flat, orphaned,
 }: {
   c: TrackedCommitment
   today: string
@@ -644,6 +790,8 @@ function Row({
   onToggle: () => void
   onResend: () => void
   onSaved: () => void
+  ownerOptions: { id: string; label: string }[]
+  onNotice: (message: string) => void
   onDelete: () => void
   confirmingDelete: boolean
   onConfirmDelete: () => void
@@ -748,7 +896,16 @@ function Row({
             </span>
           )}
         </div>
-        <TaskNotes c={c} canEdit={canEdit} onSaved={onSaved} />
+        <div className="flex items-center gap-3 flex-wrap">
+          <TaskNotes c={c} canEdit={canEdit} onSaved={onSaved} />
+          <RowFields
+            c={c}
+            canEdit={canEdit}
+            ownerOptions={ownerOptions}
+            onSaved={onSaved}
+            onNotice={onNotice}
+          />
+        </div>
       </div>
 
       {!isDone && notificationsReady && (
@@ -825,7 +982,8 @@ function TaskGroup({
   c, userId, subtasks, today, nameFor, busyId, notificationsReady, expanded, onExpand,
   onToggle, onResend, onSaved, onDelete, confirmingDelete, onConfirmDelete, subtaskCount,
   subtaskOpen, onSubtaskOpen, subtaskTitle, onSubtaskTitle,
-  subtaskAssignee, onSubtaskAssignee, ownerOptions, onSubtaskAdd, orphaned,
+  subtaskAssignee, onSubtaskAssignee, subtaskDue, onSubtaskDue, onNotice,
+  ownerOptions, onSubtaskAdd, orphaned,
 }: {
   c: TrackedCommitment
   userId: string
@@ -849,6 +1007,9 @@ function TaskGroup({
   onSubtaskTitle: (value: string) => void
   subtaskAssignee: string
   onSubtaskAssignee: (value: string) => void
+  subtaskDue: string
+  onSubtaskDue: (value: string) => void
+  onNotice: (message: string) => void
   ownerOptions: { id: string; label: string }[]
   onSubtaskAdd: () => void
   /** This row is itself a subtask whose parent is not visible. */
@@ -882,6 +1043,8 @@ function TaskGroup({
         onToggle={() => onToggle(c)}
         onResend={() => onResend(c)}
         onSaved={onSaved}
+        ownerOptions={ownerOptions}
+        onNotice={onNotice}
         onDelete={() => onDelete(c)}
         confirmingDelete={confirmingDelete === c.id}
         onConfirmDelete={() => onConfirmDelete(confirmingDelete === c.id ? null : c.id)}
@@ -930,6 +1093,13 @@ function TaskGroup({
             autoFocus
             className="flex-1 min-w-[180px] border border-light-gray rounded-lg px-3 py-1.5 text-sm focus:border-steel-blue focus:outline-none"
           />
+          <input
+            type="date"
+            value={subtaskDue}
+            onChange={e => onSubtaskDue(e.target.value)}
+            aria-label="Subtask due date"
+            className="border border-light-gray rounded-lg px-2 py-1.5 text-sm focus:border-steel-blue focus:outline-none"
+          />
           <select
             value={subtaskAssignee}
             onChange={e => onSubtaskAssignee(e.target.value)}
@@ -964,6 +1134,8 @@ function TaskGroup({
               onToggle={() => onToggle(sub)}
               onResend={() => onResend(sub)}
               onSaved={onSaved}
+              ownerOptions={ownerOptions}
+              onNotice={onNotice}
               onDelete={() => onDelete(sub)}
               confirmingDelete={confirmingDelete === sub.id}
               onConfirmDelete={() => onConfirmDelete(confirmingDelete === sub.id ? null : sub.id)}

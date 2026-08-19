@@ -218,15 +218,81 @@ export function closedBlocks(args: {
   }
 }
 
-/** Reopened in the app: the button comes back, because it works again. */
-export function reopenedBlocks(args: { title: string; commitmentId: string }): {
+/**
+ * The message in the previous owner's DM, once a task has been handed to someone
+ * else.
+ *
+ * The button has to go. It closes by commitment id, not by who pressed it, so
+ * leaving it live means the former owner can still close work that is no longer
+ * theirs — and the message would otherwise keep telling them to do a task that
+ * has moved.
+ */
+export function reassignedBlocks(args: { title: string; toName: string }): {
   text: string
   blocks: unknown[]
 } {
   return {
+    text: `Reassigned: ${args.title}`,
+    blocks: [
+      {
+        type: 'section',
+        text: { type: 'mrkdwn', text: `~${escapeMrkdwn(args.title)}~` },
+      },
+      {
+        type: 'context',
+        elements: [{
+          type: 'mrkdwn',
+          text: `Reassigned to ${escapeMrkdwn(args.toName)} — nothing for you to do here.`,
+        }],
+      },
+    ],
+  }
+}
+
+/**
+ * A one-line note to whoever handed out a task, so they know it landed.
+ *
+ * Deliberately plain: no button, no thread, nothing to action. The point is to
+ * close the loop without adding a second stream of messages to keep up with.
+ */
+export function assignerConfirmationBlocks(args: {
+  title: string
+  toName: string
+  dueLabel: string
+}): { text: string; blocks: unknown[] } {
+  const text = `Sent to ${args.toName}: ${args.title} (${args.dueLabel})`
+  return {
+    text,
+    blocks: [
+      {
+        type: 'context',
+        elements: [{
+          type: 'mrkdwn',
+          text: `Sent to *${escapeMrkdwn(args.toName)}* — ${escapeMrkdwn(args.title)} · ${escapeMrkdwn(args.dueLabel)}`,
+        }],
+      },
+    ],
+  }
+}
+
+/** Reopened in the app: the button comes back, because it works again. */
+export function reopenedBlocks(args: {
+  title: string
+  commitmentId: string
+  /** Current due date. Absent keeps the old wording, for callers that have none. */
+  dueLabel?: string | null
+}): {
+  text: string
+  blocks: unknown[]
+} {
+  // The second line carries the state. A redraw is also how a changed deadline
+  // reaches someone: better to update the message they already have than to send
+  // a second one about the same task.
+  const second = args.dueLabel ? args.dueLabel : 'Reopened'
+  return {
     text: args.title,
     blocks: [
-      { type: 'section', text: { type: 'mrkdwn', text: `*${escapeMrkdwn(args.title)}*\nReopened` } },
+      { type: 'section', text: { type: 'mrkdwn', text: `*${escapeMrkdwn(args.title)}*\n${escapeMrkdwn(second)}` } },
       {
         type: 'actions',
         elements: [

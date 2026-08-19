@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server'
-import { postMessage, lookupUserByEmail, taskBlocks, slackConfigured, escapeMrkdwn } from '@/lib/slack'
+import {
+  postMessage, lookupUserByEmail, taskBlocks, slackConfigured, escapeMrkdwn,
+  assignerConfirmationBlocks,
+} from '@/lib/slack'
 import { sendMail, mailConfigured, taskEmail, appBaseUrl } from '@/lib/mail'
 import { signActionToken } from '@/lib/action-token'
 import { serviceClient, tryServiceClient, logNotification } from '@/lib/complete-task'
@@ -33,7 +36,7 @@ type Row = {
   notify_email: boolean
   meeting: { meeting_date: string } | null
   assignee: { id: string; full_name: string | null; email: string | null; slack_user_id: string | null } | null
-  creator: { full_name: string | null } | null
+  creator: { id: string; full_name: string | null; slack_user_id: string | null } | null
 }
 
 function firstName(fullName: string | null | undefined): string {
@@ -121,7 +124,7 @@ async function run(commitmentId?: string) {
     'id, title, description, due_date, assignee_id, creator_id, meeting_id, notify_slack, notify_email,' +
     ' meeting:meetings(meeting_date),' +
     ' assignee:profiles!weekly_commitments_assignee_id_fkey(id, full_name, email, slack_user_id),' +
-    ' creator:profiles!weekly_commitments_creator_id_fkey(full_name)'
+    ' creator:profiles!weekly_commitments_creator_id_fkey(id, full_name, slack_user_id)'
 
   let query = sb.from('weekly_commitments').select(COLUMNS).eq('status', 'open')
 
@@ -159,18 +162,19 @@ async function run(commitmentId?: string) {
 
     const dueLabel = row.due_date ? describeDue(row.due_date, today) : 'No due date'
     const overdue = Boolean(row.due_date && row.due_date < today)
-    const askedBy = normalizeOne(row.creator)?.full_name || 'Someone on your team'
+    const creator = normalizeOne(row.creator)
+    const askedBy = creator?.full_name || 'Someone on your team'
     const meetingDate = normalizeOne(row.meeting)?.meeting_date ?? null
     let delivered = false
 
     if (slackOn && row.notify_slack) {
-      const res = await sendSlack(sb, { row, assignee, dueLabel, askedBy, meetingDate, overdue })
+      const res = await sendSlack(sb, { row, assignee, dueLabel, askedBy, meetingDate, overdue, creator })
       outcome.slack = res
       if (res === 'sent') delivered = true
     }
 
     if (mailOn && row.notify_email && assignee.email) {
-      const res = await sendEmail(sb, { row, assignee, dueLabel, askedBy, meetingDate, overdue })
+      const res = await sendEmail(sb, { row, assignee, dueLabel, askedBy, meetingDate, overdue, creator })
       outcome.email = res
       if (res === 'sent') delivered = true
     }
@@ -206,11 +210,12 @@ type SendArgs = {
   meetingDate: string | null
   /** Computed once from the loop's `today`, so it cannot disagree with dueLabel. */
   overdue: boolean
+  creator: { id: string; full_name: string | null; slack_user_id: string | null } | null
 }
 
 async function sendSlack(
   sb: ReturnType<typeof serviceClient>,
-  { row, assignee, dueLabel, askedBy, meetingDate }: SendArgs,
+  { row, assignee, dueLabel, askedBy, meetingDate, creator }: SendArgs,
 ): Promise<string> {
   let slackUserId = assignee.slack_user_id
 
@@ -257,7 +262,45 @@ async function sendSlack(
     commitment_id: row.id, user_id: assignee.id, channel: 'slack', event: 'notify',
     status: 'sent', detail: `dm ${data.channel}`,
   })
+
+  await confirmToAssigner(sb, { row, assignee, creator, dueLabel })
   return 'sent'
+}
+
+/**
+ * Tells whoever handed out the task that it landed.
+ *
+ * Only when the task went to someone else — nobody needs telling they told
+ * themselves — and only once the assignee's DM has actually been delivered, so
+ * this can never claim a send that did not happen.
+ *
+ * Failures are logged and swallowed. The assignee has the task either way, and
+ * failing the whole send over a courtesy note would mean retrying a DM that
+ * already arrived.
+ */
+async function confirmToAssigner(
+  sb: ReturnType<typeof serviceClient>,
+  { row, assignee, creator, dueLabel }: Pick<SendArgs, 'row' | 'assignee' | 'creator' | 'dueLabel'>,
+): Promise<void> {
+  if (!creator?.id || creator.id === assignee.id) return
+  if (!creator.slack_user_id) return
+
+  const { text, blocks } = assignerConfirmationBlocks({
+    title: row.title,
+    toName: assignee.full_name || 'them',
+    dueLabel,
+  })
+
+  const { error } = await postMessage({ channel: creator.slack_user_id, text, blocks })
+
+  await logNotification(sb, {
+    commitment_id: row.id,
+    user_id: creator.id,
+    channel: 'slack',
+    event: 'notify',
+    status: error ? 'failed' : 'sent',
+    detail: error ? `assigner confirmation: ${error}` : 'assigner confirmation',
+  })
 }
 
 async function sendEmail(

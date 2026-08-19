@@ -1,5 +1,6 @@
 import { createClient as createServiceClient, type SupabaseClient } from '@supabase/supabase-js'
 import { updateMessage, closedBlocks, reopenedBlocks, slackConfigured } from './slack'
+import { describeDue } from './tracker'
 
 /**
  * Closing a task from outside the app.
@@ -143,7 +144,7 @@ export async function syncSlackMessage(sb: SupabaseClient, taskId: string): Prom
   try {
     const { data } = await sb
       .from('weekly_commitments')
-      .select('id, title, status, slack_channel, slack_ts, completed_via, completer:profiles!weekly_commitments_completed_by_fkey(full_name)')
+      .select('id, title, status, due_date, slack_channel, slack_ts, completed_via, completer:profiles!weekly_commitments_completed_by_fkey(full_name)')
       .eq('id', taskId)
       .maybeSingle()
 
@@ -159,7 +160,11 @@ export async function syncSlackMessage(sb: SupabaseClient, taskId: string): Prom
             byName: completer?.full_name ?? null,
             via: (data.completed_via as string) ?? null,
           })
-        : reopenedBlocks({ title: data.title as string, commitmentId: data.id as string })
+        : reopenedBlocks({
+            title: data.title as string,
+            commitmentId: data.id as string,
+            dueLabel: data.due_date ? describeDue(data.due_date as string) : 'No due date',
+          })
 
     const { error } = await updateMessage({
       channel: data.slack_channel as string,
