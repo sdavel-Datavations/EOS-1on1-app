@@ -182,6 +182,13 @@ were once left in the live database, and how misleading cron heartbeats were nea
 the log. The teardown is narrow and `example.com` is IANA-reserved, but **a second Supabase
 project for tests is the actual fix** — worth doing before anyone else's data is in there.
 
+This is also why CI runs only part of the suite. Of 304 tests, **270 are pure functions** —
+no browser, no network, no credentials, 1.9s — and those are what GitHub Actions runs on every
+push. The remaining 34 live in `tests/e2e.spec.ts`, which signs real accounts in and out of
+the live project; putting the service-role key in GitHub to run them would mean writing to
+production on every push. Run those locally before pushing. A second Supabase project would
+let CI run everything.
+
 ## Known gaps, not yet built
 
 - **Three overlapping task concepts on one agenda:** `todos`, Weekly Commitments, Open Work.

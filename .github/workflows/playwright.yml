@@ -1,4 +1,4 @@
-name: E2E Tests (Playwright)
+name: Tests
 
 on:
   push:
@@ -7,20 +7,21 @@ on:
     branches: [ main ]
 
 jobs:
-  e2e:
+  logic:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - name: Install dependencies
-        run: npm ci
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps
-      - name: Run Playwright tests against deployed site
-        env:
-          DEPLOY_URL: https://eos-1on1-app.vercel.app
-        run: |
-          npx playwright test --config=playwright.config.ts --reporter=github
+          cache: npm
+      - run: npm ci
+
+      # tests/e2e.spec.ts is deliberately excluded. It signs real accounts in and
+      # out of the live Supabase project, so running it here would mean holding the
+      # service-role key in GitHub and writing to production on every push. It runs
+      # locally before a push instead. Everything else is pure functions: no
+      # browser, no network, no credentials — which is why there is no
+      # `playwright install` step. Add one if a browser test ever joins this set.
+      - name: Run the logic suite
+        run: npx playwright test --reporter=github $(ls tests/*.spec.ts | grep -v e2e)
