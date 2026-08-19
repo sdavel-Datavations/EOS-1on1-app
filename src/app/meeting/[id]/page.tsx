@@ -234,15 +234,23 @@ export default function MeetingPage({ params }: { params: Promise<{ id: string }
   return (
     <div className="min-h-screen">
       {/* Header */}
-      <header className="bg-deep-purple px-6 py-4 flex items-center justify-between sticky top-0 z-50">
-        <div className="flex items-center gap-4">
+      <header className="bg-deep-purple px-4 sm:px-6 py-3 flex items-center justify-between gap-x-3 gap-y-2 flex-wrap sticky top-0 z-50">
+        <div className="flex items-center gap-3 sm:gap-4">
           <Link href="/" className="text-white/60 hover:text-white transition text-sm">&larr; Back</Link>
           <span className="text-white font-bold tracking-wider text-lg">DATAVATIONS</span>
           <span className="text-white/70 text-sm font-light">1-on-1 Agenda</span>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3 sm:gap-4">
+          {/* Noon local, not midnight: parsing a plain date as UTC lands on the
+              previous day west of Greenwich. The long form is dropped on a narrow
+              screen so the timer and Sign out stay on the row. */}
           <span className="text-steel-blue font-semibold text-sm">
-            {new Date(meeting.meeting_date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' })}
+            <span className="sm:hidden">
+              {new Date(meeting.meeting_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+            </span>
+            <span className="hidden sm:inline">
+              {new Date(meeting.meeting_date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' })}
+            </span>
           </span>
           <div className={`bg-white/10 rounded-lg px-3 py-1 text-white text-xl font-bold tabular-nums min-w-[80px] text-center ${masterElapsed > 1800 ? 'text-coral-red' : ''}`}>
             {fmt(masterElapsed)}
@@ -607,11 +615,23 @@ function ScorecardList({ items, meetingId, type, onUpdate }: {
 }
 
 // ── Issues List Component ──
+/**
+ * The issues list.
+ *
+ * Unresolved issues now carry into the next 1-on-1, which only works if there is a
+ * way to resolve one — otherwise every issue ever raised is immortal and the list
+ * becomes noise within a month. `resolved` had existed as a column with nothing
+ * setting it.
+ *
+ * Resolved issues drop off the open list into a collapsed section, the same as
+ * finished commitments: solved is worth recording, not worth re-reading weekly.
+ */
 function IssuesList({ issues, meetingId, onUpdate }: {
   issues: Issue[], meetingId: string, onUpdate: () => void
 }) {
   const priorities = ['H', 'M', 'L'] as const
   const priorityColors = { H: 'bg-red-light text-[#c0392b]', M: 'bg-amber-light text-[#e67e22]', L: 'bg-green-light text-green' }
+  const [showResolved, setShowResolved] = useState(false)
 
   const cyclePriority = (issue: Issue) => {
     const idx = priorities.indexOf(issue.priority)
@@ -620,41 +640,73 @@ function IssuesList({ issues, meetingId, onUpdate }: {
     onUpdate()
   }
 
+  const toggleResolved = async (issue: Issue) => {
+    await upsertIssue({ id: issue.id, meeting_id: meetingId, resolved: !issue.resolved })
+    onUpdate()
+  }
+
   const addIssue = async () => {
     await upsertIssue({ meeting_id: meetingId, description: '', priority: 'H', sort_order: issues.length })
     onUpdate()
   }
 
+  const openIssues = issues.filter(i => !i.resolved)
+  const resolvedIssues = issues.filter(i => i.resolved)
+
+  const row = (issue: Issue) => (
+    <div key={issue.id} className="flex items-start gap-2">
+      <button
+        onClick={() => cyclePriority(issue)}
+        className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 mt-1 ${priorityColors[issue.priority]}`}
+        title="Click to cycle priority"
+      >
+        {issue.priority}
+      </button>
+      <div className="flex-1 space-y-1">
+        <input
+          type="text"
+          defaultValue={issue.description}
+          placeholder="Issue description..."
+          onBlur={e => upsertIssue({ id: issue.id, meeting_id: meetingId, description: e.target.value })}
+          className={`w-full border border-light-gray rounded-lg px-3 py-2 text-sm focus:border-steel-blue focus:outline-none ${issue.resolved ? 'line-through text-gray' : ''}`}
+        />
+        <input
+          type="text"
+          defaultValue={issue.resolution}
+          placeholder="Resolution / to-do → owner..."
+          onBlur={e => upsertIssue({ id: issue.id, meeting_id: meetingId, resolution: e.target.value })}
+          className="w-full border border-light-gray rounded-lg px-3 py-1.5 text-xs text-gray focus:border-steel-blue focus:outline-none focus:text-near-black font-condensed"
+        />
+      </div>
+      <button
+        onClick={() => toggleResolved(issue)}
+        title={issue.resolved ? 'Reopen this issue' : 'Mark as resolved'}
+        className={`w-6 h-6 rounded flex items-center justify-center text-xs border-2 flex-shrink-0 mt-1.5 transition ${
+          issue.resolved ? 'bg-green border-green text-white' : 'border-light-gray text-transparent hover:border-green'
+        }`}
+      >
+        ✓
+      </button>
+      <button onClick={() => { deleteIssue(issue.id); onUpdate() }} className="text-light-gray hover:text-coral-red transition text-lg mt-1">&times;</button>
+    </div>
+  )
+
   return (
     <div className="space-y-2">
-      {issues.map(issue => (
-        <div key={issue.id} className="flex items-start gap-2">
+      {openIssues.map(row)}
+
+      {resolvedIssues.length > 0 && (
+        <div>
           <button
-            onClick={() => cyclePriority(issue)}
-            className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 mt-1 ${priorityColors[issue.priority]}`}
-            title="Click to cycle priority"
+            onClick={() => setShowResolved(!showResolved)}
+            className="text-[11px] font-bold uppercase tracking-wide text-green hover:text-[#2d8a47] transition"
           >
-            {issue.priority}
+            {showResolved ? '▾' : '▸'} Resolved · {resolvedIssues.length}
           </button>
-          <div className="flex-1 space-y-1">
-            <input
-              type="text"
-              defaultValue={issue.description}
-              placeholder="Issue description..."
-              onBlur={e => upsertIssue({ id: issue.id, meeting_id: meetingId, description: e.target.value })}
-              className="w-full border border-light-gray rounded-lg px-3 py-2 text-sm focus:border-steel-blue focus:outline-none"
-            />
-            <input
-              type="text"
-              defaultValue={issue.resolution}
-              placeholder="Resolution / to-do → owner..."
-              onBlur={e => upsertIssue({ id: issue.id, meeting_id: meetingId, resolution: e.target.value })}
-              className="w-full border border-light-gray rounded-lg px-3 py-1.5 text-xs text-gray focus:border-steel-blue focus:outline-none focus:text-near-black font-condensed"
-            />
-          </div>
-          <button onClick={() => { deleteIssue(issue.id); onUpdate() }} className="text-light-gray hover:text-coral-red transition text-lg mt-1">&times;</button>
+          {showResolved && <div className="space-y-2 mt-2">{resolvedIssues.map(row)}</div>}
         </div>
-      ))}
+      )}
+
       <button onClick={addIssue} className="w-full border border-dashed border-light-gray rounded-lg py-2 text-xs text-gray hover:border-steel-blue hover:text-steel-blue transition">
         + Add issue
       </button>

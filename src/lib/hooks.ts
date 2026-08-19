@@ -272,6 +272,42 @@ export async function createMeeting(managerId: string, reportId: string | null, 
     }
   }
 
+  /*
+   * Unresolved issues carry forward.
+   *
+   * They used to die with the meeting, which is the opposite of how an issues list
+   * works: an issue stays on it until it is actually solved. Anything left
+   * unresolved last time is the first thing that should be in front of you now.
+   *
+   * Copied rather than read in place, unlike Rocks, because an issue belongs to
+   * the discussion that raised it — the resolution text and priority are notes on
+   * that conversation, and last week's wording should not change when this week's
+   * does.
+   */
+  if (prevMeeting) {
+    const { data: prevIssues } = await sb
+      .from('issues')
+      .select('*')
+      .eq('meeting_id', prevMeeting.id)
+      .eq('resolved', false)
+      .order('sort_order')
+
+    if (prevIssues?.length) {
+      await sb.from('issues').insert(
+        prevIssues.map((issue, i) => ({
+          meeting_id: meeting.id,
+          description: issue.description,
+          priority: issue.priority,
+          // The resolution field starts empty: whatever was written last time did
+          // not resolve it, or it would not be here.
+          resolution: '',
+          resolved: false,
+          sort_order: i,
+        }))
+      )
+    }
+  }
+
   // Seed default scorecard items from previous meeting (carry names forward)
   if (prevMeeting) {
     // Measurables only. Rocks used to be copied forward here too, which is what

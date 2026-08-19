@@ -38,12 +38,17 @@ const FILTERS: { key: TaskFilter; label: string }[] = [
 ]
 
 export default function TaskBoard({
-  userId, userName, department,
+  userId, userName, department, accessLevel,
 }: {
   userId: string
   userName: string
   department?: string | null
+  accessLevel?: string | null
 }) {
+  // The admin exemption on due dates exists so a task created by someone who has
+  // left can still have its date corrected. Mirrored by a database trigger, so the
+  // rule holds even if this check is bypassed.
+  const isAdmin = accessLevel === 'admin'
   const { commitments, loading, error, notificationsReady, refetch } = useMyCommitments(userId)
   const teammates = useTeammates(userId)
 
@@ -466,6 +471,7 @@ export default function TaskBoard({
                     subtaskDue={subtaskDue}
                     onSubtaskDue={setSubtaskDue}
                     onNotice={setNotice}
+                    isAdmin={isAdmin}
                     ownerOptions={ownerOptions}
                     onSubtaskAdd={() => addSubtask(c)}
                     orphaned={Boolean(c.parent_id)}
@@ -522,6 +528,7 @@ export default function TaskBoard({
                       subtaskDue={subtaskDue}
                       onSubtaskDue={setSubtaskDue}
                       onNotice={setNotice}
+                      isAdmin={isAdmin}
                       ownerOptions={ownerOptions}
                       onSubtaskAdd={() => addSubtask(c)}
                       orphaned={Boolean(c.parent_id)}
@@ -650,9 +657,11 @@ function TaskNotes({ c, canEdit, onSaved }: {
  * it. Reassigning goes through a route so the previous owner's Slack message can
  * be retired — see src/app/api/tasks/reassign/route.ts.
  */
-function RowFields({ c, canEdit, ownerOptions, onSaved, onNotice }: {
+function RowFields({ c, canEdit, canSetDue, ownerOptions, onSaved, onNotice }: {
   c: TrackedCommitment
   canEdit: boolean
+  /** Only the assigner (or an admin) may move a date. Mirrored by a DB trigger. */
+  canSetDue: boolean
   ownerOptions: { id: string; label: string }[]
   onSaved: () => void
   onNotice: (message: string) => void
@@ -675,7 +684,9 @@ function RowFields({ c, canEdit, ownerOptions, onSaved, onNotice }: {
   }
 
   const save = async () => {
-    const dueChanged = (c.due_date || '') !== due
+    // Belt and braces: the input is disabled when this is false, and a trigger
+    // rejects it server-side regardless.
+    const dueChanged = canSetDue && (c.due_date || '') !== due
     const ownerChanged = owner !== c.assignee_id
     if (!dueChanged && !ownerChanged) {
       setEditing(false)
@@ -756,8 +767,13 @@ function RowFields({ c, canEdit, ownerOptions, onSaved, onNotice }: {
         value={due}
         onChange={e => setDue(e.target.value)}
         aria-label="Task due date"
-        className="border border-light-gray rounded px-2 py-1 text-xs focus:border-steel-blue focus:outline-none"
+        disabled={!canSetDue}
+        title={canSetDue ? undefined : 'Only the person who assigned this task can change its due date'}
+        className="border border-light-gray rounded px-2 py-1 text-xs focus:border-steel-blue focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
       />
+      {!canSetDue && (
+        <span className="text-[10px] text-gray">Date is the assigner&apos;s to change</span>
+      )}
       <button
         onClick={save}
         disabled={saving}
@@ -778,7 +794,7 @@ function RowFields({ c, canEdit, ownerOptions, onSaved, onNotice }: {
 
 function Row({
   c, today, nameFor, busy, notificationsReady, userId, onToggle, onResend, onSaved,
-  ownerOptions, onNotice, onDelete, confirmingDelete, onConfirmDelete,
+  ownerOptions, onNotice, isAdmin, onDelete, confirmingDelete, onConfirmDelete,
   deleteAlsoRemoves = 0, flat, orphaned,
 }: {
   c: TrackedCommitment
@@ -792,6 +808,7 @@ function Row({
   onSaved: () => void
   ownerOptions: { id: string; label: string }[]
   onNotice: (message: string) => void
+  isAdmin: boolean
   onDelete: () => void
   confirmingDelete: boolean
   onConfirmDelete: () => void
@@ -811,6 +828,10 @@ function Row({
   // Departmental and oversight visibility are read-only, so showing a checkbox
   // that the database will refuse is worse than showing none.
   const canEdit = c.assignee_id === userId || c.creator_id === userId
+  // Being handed work does not come with the authority to rewrite when it is
+  // wanted, so only the person who assigned it may move the date. Delegating it
+  // onward is a different question and stays open to whoever holds it.
+  const canSetDue = c.creator_id === userId || isAdmin
   const completer = (c as TrackedCommitment & { completer?: { full_name: string | null } | null }).completer
 
   // An overdue task reads red at the row level, not just in its date text: the
@@ -901,6 +922,7 @@ function Row({
           <RowFields
             c={c}
             canEdit={canEdit}
+            canSetDue={canSetDue}
             ownerOptions={ownerOptions}
             onSaved={onSaved}
             onNotice={onNotice}
@@ -982,7 +1004,7 @@ function TaskGroup({
   c, userId, subtasks, today, nameFor, busyId, notificationsReady, expanded, onExpand,
   onToggle, onResend, onSaved, onDelete, confirmingDelete, onConfirmDelete, subtaskCount,
   subtaskOpen, onSubtaskOpen, subtaskTitle, onSubtaskTitle,
-  subtaskAssignee, onSubtaskAssignee, subtaskDue, onSubtaskDue, onNotice,
+  subtaskAssignee, onSubtaskAssignee, subtaskDue, onSubtaskDue, onNotice, isAdmin,
   ownerOptions, onSubtaskAdd, orphaned,
 }: {
   c: TrackedCommitment
@@ -1010,6 +1032,7 @@ function TaskGroup({
   subtaskDue: string
   onSubtaskDue: (value: string) => void
   onNotice: (message: string) => void
+  isAdmin: boolean
   ownerOptions: { id: string; label: string }[]
   onSubtaskAdd: () => void
   /** This row is itself a subtask whose parent is not visible. */
@@ -1045,6 +1068,7 @@ function TaskGroup({
         onSaved={onSaved}
         ownerOptions={ownerOptions}
         onNotice={onNotice}
+        isAdmin={isAdmin}
         onDelete={() => onDelete(c)}
         confirmingDelete={confirmingDelete === c.id}
         onConfirmDelete={() => onConfirmDelete(confirmingDelete === c.id ? null : c.id)}
@@ -1136,6 +1160,7 @@ function TaskGroup({
               onSaved={onSaved}
               ownerOptions={ownerOptions}
               onNotice={onNotice}
+              isAdmin={isAdmin}
               onDelete={() => onDelete(sub)}
               confirmingDelete={confirmingDelete === sub.id}
               onConfirmDelete={() => onConfirmDelete(confirmingDelete === sub.id ? null : sub.id)}

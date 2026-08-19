@@ -1,5 +1,5 @@
 import { test, expect, Page } from '@playwright/test'
-import { seedAndLogin, createUser, invite, invitationsReady, login, baseUrl, tableExists, commitmentsTableExists, participantsTableExists, trackerReady, subtasksReady } from './playwright-auth'
+import { seedAndLogin, createUser, invite, invitationsReady, login, baseUrl, tableExists, commitmentsTableExists, participantsTableExists, trackerReady, subtasksReady, backdateMeeting } from './playwright-auth'
 import { describeDue, todayISO } from '../src/lib/tracker'
 
 async function signInAndStartMeeting(page: Page, name = 'E2E User') {
@@ -978,4 +978,64 @@ test('a finished commitment drops off the meeting’s open list', async ({ page 
   await page.reload()
   await expect(page.getByText('Everything raised here is done.')).toBeVisible({ timeout: 15000 })
   await expect(page.getByText('Send the Q3 scorecard')).toHaveCount(0)
+})
+
+test('an unresolved issue carries into the next 1-on-1', async ({ page }) => {
+  await signInAndStartMeeting(page, 'Issues Tester')
+  const firstUrl = page.url()
+  const firstId = firstUrl.split('/meeting/')[1]
+
+  // Issues are section 4, collapsed until opened
+  await page.getByText('Issues — Identify, Discuss, Solve').click()
+  await page.getByRole('button', { name: '+ Add issue' }).click()
+  const description = page.getByPlaceholder('Issue description...').last()
+  await description.fill('Pricing for the member tier is undecided')
+  // Saved on blur, so the focus has to leave the field before it persists
+  await description.blur()
+  await expect(description).toHaveValue('Pricing for the member tier is undecided')
+
+  // The app only ever dates a meeting today, and carry-forward keys off an earlier
+  // date, so the previous one has to be moved back.
+  await backdateMeeting(firstId, '2026-08-01')
+
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Start 1-on-1' }).click()
+  await expect(page).toHaveURL(/.*\/meeting\/.+/)
+  expect(page.url()).not.toBe(firstUrl)
+
+  // An issues list you have to retype is not a list. It should be waiting.
+  await page.getByText('Issues — Identify, Discuss, Solve').click()
+  const carried = page.locator('input[placeholder="Issue description..."]')
+  await expect(carried).toHaveCount(1, { timeout: 15000 })
+  await expect(carried.first()).toHaveValue('Pricing for the member tier is undecided')
+})
+
+test('a resolved issue does not follow you around', async ({ page }) => {
+  await signInAndStartMeeting(page, 'Resolved Tester')
+  const firstId = page.url().split('/meeting/')[1]
+
+  await page.getByText('Issues — Identify, Discuss, Solve').click()
+  await page.getByRole('button', { name: '+ Add issue' }).click()
+  const description = page.getByPlaceholder('Issue description...').last()
+  await description.fill('Scorecard numbers are stale')
+  await description.blur()
+  await expect(description).toHaveValue('Scorecard numbers are stale')
+
+  // Resolving is what stops carry-forward. Without it every issue is immortal,
+  // which would make the list worse than not carrying anything at all.
+  await page.getByTitle('Mark as resolved').first().click()
+  await expect(page.getByText(/Resolved · 1/)).toBeVisible({ timeout: 15000 })
+  // It drops off the open list, like a finished commitment
+  await expect(page.locator('input[placeholder="Issue description..."]')).toHaveCount(0)
+
+  await backdateMeeting(firstId, '2026-08-01')
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Start 1-on-1' }).click()
+  await expect(page).toHaveURL(/.*\/meeting\/.+/)
+
+  await page.getByText('Issues — Identify, Discuss, Solve').click()
+  await expect(page.getByRole('button', { name: '+ Add issue' })).toBeVisible({ timeout: 15000 })
+  // Nothing carried at all: a solved issue is not the next meeting's business
+  await expect(page.locator('input[placeholder="Issue description..."]')).toHaveCount(0)
+  await expect(page.getByText(/Resolved ·/)).toHaveCount(0)
 })

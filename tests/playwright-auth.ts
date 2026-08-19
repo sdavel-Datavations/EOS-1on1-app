@@ -151,3 +151,29 @@ export async function seedAndLogin(page: Page, email: string, password: string, 
 }
 
 export default seedAndLogin
+
+/**
+ * Moves a meeting's date, so a test can produce a "previous" meeting.
+ *
+ * Carry-forward keys off `meeting_date <` the new meeting's date, and the app only
+ * ever creates meetings dated today — so without backdating there is no way to
+ * exercise it through the UI. Uses the service role, like the teardown does,
+ * because this is test scaffolding rather than something a user can do.
+ */
+export async function backdateMeeting(meetingId: string, date: string) {
+  loadDotenvIfNeeded()
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (!url || !key) throw new Error('service role key needed to backdate a meeting')
+  const res = await fetch(`${url}/rest/v1/meetings?id=eq.${meetingId}`, {
+    method: 'PATCH',
+    headers: {
+      apikey: key,
+      Authorization: `Bearer ${key}`,
+      'Content-Type': 'application/json',
+      Prefer: 'return=representation',
+    },
+    body: JSON.stringify({ meeting_date: date }),
+  })
+  if (!res.ok) throw new Error(`backdate failed (${res.status}): ${await res.text()}`)
+}
