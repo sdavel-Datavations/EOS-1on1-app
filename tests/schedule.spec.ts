@@ -133,3 +133,35 @@ test.describe('wording', () => {
     expect(describeMissed(['2026-08-12', '2026-08-19'])).toContain('Wednesday 19 Aug')
   })
 })
+
+test.describe('a schedule is not blamed for weeks before it existed', () => {
+  const meetings: ScheduledMeeting[] = []
+
+  test('weeks before created_at are not expected at all', () => {
+    // A cadence set today would otherwise open with "missed 8 of the last 8",
+    // which is untrue and the fastest way to get the panel ignored.
+    const fresh: Schedule = { ...weekly, created_at: '2026-08-18T09:00:00Z' }
+    const a = adherence(fresh, meetings, '2026-06-24', '2026-08-31', '2026-08-31')
+    expect(a.expected).toEqual(['2026-08-19', '2026-08-26'])
+    expect(a.missed).toEqual(['2026-08-19', '2026-08-26'])
+  })
+
+  test('an older schedule still covers the whole window', () => {
+    const old: Schedule = { ...weekly, created_at: '2026-01-01T09:00:00Z' }
+    const a = adherence(old, meetings, '2026-08-01', '2026-08-31', '2026-08-31')
+    expect(a.expected).toHaveLength(4)
+    expect(a.missed).toHaveLength(4)
+  })
+
+  test('no created_at behaves as before, so older rows are unaffected', () => {
+    const a = adherence(weekly, meetings, '2026-08-01', '2026-08-31', '2026-08-31')
+    expect(a.expected).toHaveLength(4)
+  })
+
+  test('a schedule created today has nothing to answer for yet', () => {
+    const today: Schedule = { ...weekly, created_at: '2026-08-19T09:00:00Z' }
+    const a = adherence(today, meetings, '2026-06-24', '2026-08-31', '2026-08-19')
+    // The 19th is today and not yet missed; everything else is in the future.
+    expect(a.missed).toEqual([])
+  })
+})

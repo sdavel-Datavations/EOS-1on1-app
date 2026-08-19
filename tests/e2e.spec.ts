@@ -1,5 +1,5 @@
 import { test, expect, Page } from '@playwright/test'
-import { seedAndLogin, createUser, invite, invitationsReady, login, baseUrl, tableExists, commitmentsTableExists, participantsTableExists, trackerReady, subtasksReady, backdateMeeting, metricsReady, loadEnv, schedulesReady } from './playwright-auth'
+import { seedAndLogin, createUser, invite, invitationsReady, login, baseUrl, tableExists, commitmentsTableExists, participantsTableExists, trackerReady, subtasksReady, backdateMeeting, metricsReady, loadEnv, schedulesReady, profileIdFor, backdateSchedule } from './playwright-auth'
 import { describeDue, todayISO } from '../src/lib/tracker'
 
 async function signInAndStartMeeting(page: Page, name = 'E2E User') {
@@ -1185,11 +1185,16 @@ test('a scheduled run leaves a heartbeat even when it cannot send', async ({ req
 test('a 1-on-1 can be scheduled, and a skipped week shows up', async ({ page }) => {
   test.skip(!(await schedulesReady()), 'meeting_schedules missing — run supabase-schedules.sql')
 
+  // The manager has to exist first: the report is invited under them, and without
+  // that relationship the directory does not list them for each other at all.
+  const mgrEmail = `mgr+${Date.now()}@example.com`
+  await seedAndLogin(page, mgrEmail, 'Password123!', 'Sam Davel')
+  const mgrId = await profileIdFor(mgrEmail)
+
   const mateEmail = `sched+${Date.now()}@example.com`
-  await invite(mateEmail)
+  await invite(mateEmail, { managerId: mgrId })
   await createUser(mateEmail, 'Password123!', 'Ashley Rivera')
 
-  await seedAndLogin(page, `mgr+${Date.now()}@example.com`, 'Password123!', 'Sam Davel')
   await page.goto('/team')
   await expect(page.getByText('Ashley Rivera')).toBeVisible({ timeout: 15000 })
 
@@ -1200,14 +1205,21 @@ test('a 1-on-1 can be scheduled, and a skipped week shows up', async ({ page }) 
   await page.getByRole('button', { name: 'Save', exact: true }).click()
   await expect(page.getByRole('button', { name: /Wed · wkly/ })).toBeVisible({ timeout: 15000 })
 
-  // The dashboard now knows when it is due. Nothing has been held, so the weeks
-  // that have already passed read as missed — which is the point: a week nobody
-  // held used to leave no trace at all.
+  // The dashboard now knows when it is due — and says nothing about weeks before
+  // the schedule existed. A cadence set today opening with "missed 8 of the last 8"
+  // would be untrue, and the fastest way to get the panel ignored.
   await page.goto('/')
   await expect(page.getByRole('heading', { name: 'Cadence' })).toBeVisible({ timeout: 15000 })
   await expect(page.getByText(/Every week on Wednesday/)).toBeVisible()
+  await expect(page.getByText('Ashley Rivera')).toBeVisible()
+  await expect(page.getByText(/Missed/)).toHaveCount(0)
+
+  // Give it history, and the skipped weeks appear — which is the whole point: a
+  // week nobody held used to leave no trace anywhere.
+  await backdateSchedule(mgrId, '2026-06-01T09:00:00Z')
+  await page.reload()
+  await expect(page.getByText(/Missed/).first()).toBeVisible({ timeout: 15000 })
   await expect(page.getByText(/held 0 of/)).toBeVisible()
-  await expect(page.getByText(/Missed/).first()).toBeVisible()
 
   // Removing it takes the panel away rather than leaving an empty section
   await page.goto('/team')

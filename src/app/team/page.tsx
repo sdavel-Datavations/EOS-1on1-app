@@ -29,6 +29,11 @@ const LEVELS = ['member', 'manager', 'admin'] as const
 
 export default function TeamPage() {
   const { user, loading: authLoading, signOut } = useAuth()
+  // Above the `if (!user) return` below: a hook after an early return is called
+  // conditionally, which takes the whole page down with a rules-of-hooks error.
+  const {
+    schedules, migrationNeeded: schedulesMissing, refetch: refetchSchedules,
+  } = useSchedules(user?.id)
 
   const [people, setPeople] = useState<Person[]>([])
   const [invites, setInvites] = useState<Invite[]>([])
@@ -157,9 +162,6 @@ export default function TeamPage() {
   const possibleManagers = people.filter(p => p.access_level === 'manager' || p.access_level === 'admin')
   // Free text with suggestions, so a new department needs no migration.
   const departments = [...new Set(people.map(p => p.department).filter(Boolean) as string[])].sort()
-  const {
-    schedules, migrationNeeded: schedulesMissing, refetch: refetchSchedules,
-  } = useSchedules(user?.id)
 
   return (
     <div className="min-h-screen">

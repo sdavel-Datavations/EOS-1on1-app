@@ -208,3 +208,43 @@ export async function metricsReady() {
 export async function schedulesReady() {
   return tableExists('meeting_schedules')
 }
+
+/**
+ * A profile id by email, via the service role.
+ *
+ * Test scaffolding: the directory only lists people the caller may see, so a test
+ * that needs a manager/report pair has to establish the relationship before either
+ * can find the other.
+ */
+export async function profileIdFor(email: string): Promise<string> {
+  loadDotenvIfNeeded()
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (!url || !key) throw new Error('service role key needed to look up a profile id')
+  const res = await fetch(`${url}/rest/v1/profiles?select=id&email=eq.${encodeURIComponent(email)}`, {
+    headers: { apikey: key, Authorization: `Bearer ${key}` },
+  })
+  const rows = await res.json()
+  if (!rows?.[0]?.id) throw new Error(`no profile for ${email}`)
+  return rows[0].id as string
+}
+
+/**
+ * Moves when a schedule was created, so a test can produce history to judge.
+ *
+ * Adherence deliberately ignores weeks before the schedule existed, so a freshly
+ * created one has nothing to answer for — which means the missed-week path is
+ * unreachable through the UI alone.
+ */
+export async function backdateSchedule(managerId: string, createdAt: string) {
+  loadDotenvIfNeeded()
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
+  if (!url || !key) throw new Error('service role key needed to backdate a schedule')
+  const res = await fetch(`${url}/rest/v1/meeting_schedules?manager_id=eq.${managerId}`, {
+    method: 'PATCH',
+    headers: { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ created_at: createdAt }),
+  })
+  if (!res.ok) throw new Error(`backdate schedule failed (${res.status}): ${await res.text()}`)
+}

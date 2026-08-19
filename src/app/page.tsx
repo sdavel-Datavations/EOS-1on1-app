@@ -403,7 +403,7 @@ function SearchBar() {
  * indistinguishable from one that happened, which would erase the gaps.
  */
 function CadencePanel({ userId, meetings }: { userId: string; meetings: Meeting[] }) {
-  const { schedules, loading, migrationNeeded } = useSchedules(userId)
+  const { schedules, people, loading, migrationNeeded } = useSchedules(userId)
   const today = todayISO()
 
   if (loading || migrationNeeded || schedules.length === 0) return null
@@ -421,8 +421,7 @@ function CadencePanel({ userId, meetings }: { userId: string; meetings: Meeting[
     .filter(s => s.active)
     .map(s => {
       const other = s.manager_id === userId ? s.report_id : s.manager_id
-      const person = meetings.find(m => m.manager_id === other)?.manager
-        || meetings.find(m => m.report_id === other)?.report
+      const person = people.find(p => p.id === other)
       return {
         schedule: s,
         name: person?.full_name || person?.email || 'your 1-on-1',

@@ -57,6 +57,12 @@ There is no Anthropic key and no LLM dependency.
 
 ## Testing traps worth remembering
 
+- **A hook after an early return takes the whole page down.** `useSchedules` placed below
+  `if (!user) return` crashed `/team` completely — and the suite stayed green, because no test
+  asserted that page renders for a signed-in user. Hooks go above every early return.
+- **A green suite is not proof a page renders.** Assert on real content, not just on API
+  responses and error messages.
+
 - **`.first()` on a board with more than one task attaches work to the wrong parent**, and
   every assertion still passes because the subtask does exist — just not where the test meant.
   Scope to `data-testid="task-group"` or `data-testid="task-row"` and filter by title.
@@ -157,6 +163,12 @@ There is no Anthropic key and no LLM dependency.
 - **Held is matched by week, not by exact date.** A Wednesday slot moved to Thursday is the same
   1-on-1; marking it missed would make the figure measure punctuality rather than whether
   people are actually meeting.
+- **Weeks before the schedule existed are not misses.** A cadence set today would otherwise
+  open with "missed 8 of the last 8" — untrue, and the fastest way to get the panel ignored.
+  Clamped to `meeting_schedules.created_at`.
+- **A meeting only counts if the pair matches**, so a solo agenda (no report) does not count as
+  that person's 1-on-1. Start the 1-on-1 with their email in Direct Report or it reads as
+  missed.
 - **Today is never missed yet** — the 1-on-1 may still be this afternoon, and flagging it at
   breakfast would make the current week always look bad.
 - Only the **manager side** (or an admin, or someone above them) can create or change a

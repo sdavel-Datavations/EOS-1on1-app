@@ -724,14 +724,16 @@ export function useOpenWork(meetingId: string, ownerIds: string[]) {
  */
 export function useSchedules(userId: string | undefined) {
   const [schedules, setSchedules] = useState<Schedule[]>([])
+  const [people, setPeople] = useState<Profile[]>([])
   const [loading, setLoading] = useState(true)
   const [migrationNeeded, setMigrationNeeded] = useState(false)
 
   const fetchSchedules = useCallback(async () => {
     if (!userId) return
-    const { data, error } = await getSupabase()
+    const sb = getSupabase()
+    const { data, error } = await sb
       .from('meeting_schedules')
-      .select('id, manager_id, report_id, cadence, weekday, active')
+      .select('id, manager_id, report_id, cadence, weekday, active, created_at')
       .order('weekday')
 
     if (error) {
@@ -741,14 +743,29 @@ export function useSchedules(userId: string | undefined) {
       setSchedules([])
     } else {
       setMigrationNeeded(false)
-      setSchedules((data as unknown as Schedule[]) || [])
+      const rows = (data as unknown as Schedule[]) || []
+      setSchedules(rows)
+
+      // Names come from profiles, not from meetings. A solo agenda has no report
+      // to read a name off, so the panel used to fall back to "your 1-on-1" for
+      // the very pairs it was reporting on.
+      const ids = [...new Set(rows.flatMap(r => [r.manager_id, r.report_id]))]
+      if (ids.length > 0) {
+        const { data: profiles } = await sb
+          .from('profiles')
+          .select('id, full_name, email')
+          .in('id', ids)
+        setPeople((profiles as unknown as Profile[]) || [])
+      } else {
+        setPeople([])
+      }
     }
     setLoading(false)
   }, [userId])
 
   useEffect(() => { fetchSchedules() }, [fetchSchedules])
 
-  return { schedules, loading, migrationNeeded, refetch: fetchSchedules }
+  return { schedules, people, loading, migrationNeeded, refetch: fetchSchedules }
 }
 
 export function describeScheduleError(error: { code?: string; message: string }) {

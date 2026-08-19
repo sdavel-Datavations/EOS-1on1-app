@@ -20,6 +20,8 @@ export interface Schedule {
   /** 0 = Sunday, matching getUTCDay(). */
   weekday: number
   active: boolean
+  /** When the schedule was set. Weeks before it are not misses. */
+  created_at?: string | null
 }
 
 export interface ScheduledMeeting {
@@ -95,7 +97,12 @@ export function adherence(
   to: string,
   today: string = todayISO(),
 ): Adherence {
-  const expected = expectedDates(schedule, from, to)
+  // Never blame a schedule for weeks that predate it. A cadence set today would
+  // otherwise open with "missed 8 of the last 8", which is both untrue and the
+  // fastest way to get the whole panel ignored.
+  const began = schedule.created_at ? schedule.created_at.slice(0, 10) : from
+  const start = began > from ? began : from
+  const expected = expectedDates(schedule, start, to)
 
   const weeksMet = new Set(
     meetings
