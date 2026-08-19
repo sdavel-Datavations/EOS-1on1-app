@@ -107,7 +107,14 @@ export default function TeamPage() {
       department: dept.trim() || null,
     })
     if (result) {
-      setNotice(`${email.trim()} can now sign up. They'll land under the manager you picked.`)
+      // Inviting sends no email — it records the permission to sign up. Saying so
+      // here, with the link, is the difference between someone joining today and
+      // someone waiting on a message that is never coming.
+      setNotice(
+        `${email.trim()} can now sign up. Nothing was emailed, so send them ` +
+        `${window.location.origin} and ask them to choose Sign up. ` +
+        `They'll land under the manager you picked.`,
+      )
       setEmail('')
     }
   }
