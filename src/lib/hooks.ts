@@ -4,6 +4,7 @@ import { findExactDuplicate, type ExistingItem } from './dedupe'
 import { parseActionItems, resolveOwner } from './parse-action-items'
 import { partitionOpenWork, EMPTY_OPEN_WORK, type OpenWork } from './open-work'
 import { summarizeNotify, type NotifySummary } from './notify-outcome'
+import type { MetricTask, MetricEvent } from './metrics'
 import type { Rock, RockCheckin, RockStatus, Meeting, SegueNote, ScorecardItem, Headline, Issue, Todo, SectionTimer, Profile, Commitment, TrackedCommitment, Teammate, MeetingParticipant, ParticipantRole, ExtractedItem } from './types'
 
 function getSupabase() {
@@ -709,6 +710,104 @@ export function useOpenWork(meetingId: string, ownerIds: string[]) {
  * tomorrow — and the Slack message is also what makes "reply done" possible at
  * all, since a threaded reply is matched back to the task by its message id.
  */
+
+export interface MetricsData {
+  /** Everyone whose numbers the caller is entitled to see. */
+  people: Profile[]
+  tasks: MetricTask[]
+  events: MetricEvent[]
+  loading: boolean
+  error: string | null
+  /** True until supabase-metrics.sql runs: team_ids() decides who is in scope. */
+  migrationNeeded: boolean
+  /** False until commitment_events exists, which is what makes on-time honest. */
+  eventsAvailable: boolean
+}
+
+/**
+ * The data behind the accountability dashboard.
+ *
+ * Scope comes from team_ids() rather than from reading the profiles table, which
+ * is deliberately wider: can_view_profile also grants anyone you share a meeting
+ * with, and a peer's numbers are not a manager's business. Authority here flows
+ * down the reporting line only, plus everything for an admin.
+ */
+export function useMetrics(userId: string | undefined): MetricsData & { refetch: () => void } {
+  const [data, setData] = useState<Omit<MetricsData, 'loading'>>({
+    people: [], tasks: [], events: [], error: null, migrationNeeded: false, eventsAvailable: true,
+  })
+  const [loading, setLoading] = useState(true)
+
+  const fetchAll = useCallback(async () => {
+    if (!userId) return
+    const sb = getSupabase()
+
+    const { data: idRows, error: idError } = await sb.rpc('team_ids')
+    if (idError) {
+      // No error string as well: the page renders a specific notice for this, and
+      // two banners saying the same thing reads as two separate problems.
+      setData({
+        people: [], tasks: [], events: [], eventsAvailable: false,
+        migrationNeeded: true, error: null,
+      })
+      setLoading(false)
+      return
+    }
+
+    // A set-returning scalar function comes back as bare values, but PostgREST has
+    // wrapped them in objects before now, so accept either rather than break on it.
+    const ids: string[] = (idRows || [])
+      .map((row: unknown) => (typeof row === 'string' ? row : (row as { team_ids?: string })?.team_ids))
+      .filter(Boolean) as string[]
+
+    if (ids.length === 0) {
+      setData({ people: [], tasks: [], events: [], error: null, migrationNeeded: false, eventsAvailable: true })
+      setLoading(false)
+      return
+    }
+
+    const [{ data: people }, { data: rows, error: taskError }] = await Promise.all([
+      sb.from('profiles').select('id, full_name, email, department, manager_id, access_level').in('id', ids),
+      sb
+        .from('weekly_commitments')
+        .select('id, assignee_id, creator_id, status, due_date, completed_at, completed_via, created_at')
+        .or(`assignee_id.in.(${ids.join(',')}),creator_id.in.(${ids.join(',')})`),
+    ])
+
+    const tasks = (rows as unknown as MetricTask[]) || []
+
+    // Deadline changes are what stop "on time" from being gamed by moving the date.
+    // Absent before the migration, so the page says the number is soft rather than
+    // quietly presenting it as sound.
+    let events: MetricEvent[] = []
+    let eventsAvailable = true
+    if (tasks.length > 0) {
+      const { data: eventRows, error: eventError } = await sb
+        .from('commitment_events')
+        .select('commitment_id, event')
+        .in('commitment_id', tasks.map(t => t.id))
+      if (eventError) eventsAvailable = false
+      else events = (eventRows as unknown as MetricEvent[]) || []
+    }
+
+    setData({
+      people: (people as unknown as Profile[]) || [],
+      tasks,
+      events,
+      error: taskError ? describeCommitmentError(taskError) : null,
+      migrationNeeded: false,
+      eventsAvailable,
+    })
+    setLoading(false)
+    // No period in the dependencies: the window is applied to the rows in
+    // statsFor, so changing it must not refetch.
+  }, [userId])
+
+  useEffect(() => { fetchAll() }, [fetchAll])
+
+  return { ...data, loading, refetch: fetchAll }
+}
+
 export async function notifyCommitment(id: string): Promise<{
   /** Set only when the request itself failed, so no channel was even attempted. */
   error: string | null

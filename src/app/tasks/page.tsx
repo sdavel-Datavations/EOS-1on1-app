@@ -44,6 +44,7 @@ export default function TasksPage() {
             <Link href="/" className="text-white/60 hover:text-white transition">Agenda</Link>
             <span className="text-white font-semibold">Tasks</span>
             <Link href="/team" className="text-white/60 hover:text-white transition">Team</Link>
+            <Link href="/metrics" className="text-white/60 hover:text-white transition">Metrics</Link>
           </nav>
         </div>
         <div className="flex items-center gap-3 sm:gap-4">

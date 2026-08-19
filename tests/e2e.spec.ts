@@ -1,5 +1,5 @@
 import { test, expect, Page } from '@playwright/test'
-import { seedAndLogin, createUser, invite, invitationsReady, login, baseUrl, tableExists, commitmentsTableExists, participantsTableExists, trackerReady, subtasksReady, backdateMeeting } from './playwright-auth'
+import { seedAndLogin, createUser, invite, invitationsReady, login, baseUrl, tableExists, commitmentsTableExists, participantsTableExists, trackerReady, subtasksReady, backdateMeeting, metricsReady } from './playwright-auth'
 import { describeDue, todayISO } from '../src/lib/tracker'
 
 async function signInAndStartMeeting(page: Page, name = 'E2E User') {
@@ -1038,4 +1038,47 @@ test('a resolved issue does not follow you around', async ({ page }) => {
   // Nothing carried at all: a solved issue is not the next meeting's business
   await expect(page.locator('input[placeholder="Issue description..."]')).toHaveCount(0)
   await expect(page.getByText(/Resolved ·/)).toHaveCount(0)
+})
+
+test('the metrics page is not readable without a session', async ({ page }) => {
+  await page.goto('/metrics')
+  await expect(page.getByText('You need to be signed in to see metrics.')).toBeVisible({ timeout: 10000 })
+})
+
+test('metrics show your own numbers and say when scope is just you', async ({ page }) => {
+  const ready = await metricsReady()
+
+  await seedAndLogin(page, `metrics+${Date.now()}@example.com`, 'Password123!', 'Metrics Tester')
+
+  // A task closed late, so there is something to count
+  await page.goto('/tasks')
+  await page.getByPlaceholder('What needs doing?').fill('Chase the vendor invoice')
+  await page.locator('input[type="date"]').first().fill('2026-08-01')
+  await page.getByRole('button', { name: /Add & Notify/ }).click()
+  await expect(page.getByText('Chase the vendor invoice')).toBeVisible({ timeout: 20000 })
+
+  await page.getByRole('link', { name: 'Metrics' }).click()
+  await expect(page).toHaveURL(/\/metrics$/)
+  await expect(page.getByRole('heading', { name: 'Accountability' })).toBeVisible({ timeout: 15000 })
+
+  if (!ready) {
+    // Before the migration the page must say so rather than showing nothing and
+    // letting it read as "no data".
+    await expect(page.getByText(/Run supabase-metrics\.sql/).first()).toBeVisible({ timeout: 15000 })
+    return
+  }
+
+  // A fresh account manages nobody, so scope is one person and the page says so
+  // instead of looking broken.
+  await expect(page.getByText(/Only your own numbers so far/)).toBeVisible({ timeout: 15000 })
+  await expect(page.getByText('Metrics Tester')).toBeVisible()
+
+  // One open task, already past its date
+  await expect(page.getByText('Overdue')).toBeVisible()
+  // Too little finished work to publish a rate, and it says that rather than 0%
+  await expect(page.getByText(/not enough data/)).toBeVisible()
+
+  // The period control changes the closed-work window without reloading
+  await page.getByRole('button', { name: '7 days' }).click()
+  await expect(page.getByText(/Closed \/ 7d/)).toBeVisible()
 })

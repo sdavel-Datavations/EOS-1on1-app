@@ -177,3 +177,24 @@ export async function backdateMeeting(meetingId: string, date: string) {
   })
   if (!res.ok) throw new Error(`backdate failed (${res.status}): ${await res.text()}`)
 }
+
+/**
+ * True once supabase-metrics.sql has been applied.
+ *
+ * Probes the function rather than a table: team_ids() is what decides scope, and
+ * PostgREST answers PGRST202 for a function it cannot find. An anon caller gets an
+ * empty set rather than an error once it exists, which is a clean yes/no.
+ */
+export async function metricsReady() {
+  loadDotenvIfNeeded()
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  if (!url || !anon) return false
+  const res = await fetch(`${url}/rest/v1/rpc/team_ids`, {
+    method: 'POST',
+    headers: { apikey: anon, Authorization: `Bearer ${anon}`, 'Content-Type': 'application/json' },
+    body: '{}',
+  })
+  if (res.ok) return true
+  return !(await res.text()).includes('PGRST202')
+}

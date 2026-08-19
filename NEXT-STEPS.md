@@ -147,9 +147,29 @@ There is no Anthropic key and no LLM dependency.
 - No AI/LLM dependency. "Import Next Steps" parses the action-item list Granola or Gemini
   already produced — `src/lib/parse-action-items.ts`.
 
+## Metrics dashboard (`/metrics`)
+
+- Scope comes from `team_ids()`, **not** from reading `profiles`. `can_view_profile` is
+  deliberately wider — it also grants anyone you share a meeting with — and a peer's numbers
+  are not a manager's business. Authority flows down the reporting line only, plus everything
+  for an admin. `team_ids()` is recursive with the same depth cap `manages()` uses.
+- **On time** is `completed_at::date <= due_date`. A task with no due date is neither on time
+  nor late and sits outside the figure entirely — counting those as punctual would flatter
+  everyone, since a task can be created with no date at all.
+- **`onTimeRate` returns null below four judged tasks.** One late out of three reads as 33% and
+  swings to 0% next week; a blank misleads less than a number that moves that much.
+- **`commitment_events` is what keeps it honest.** Due dates are editable, so
+  `completed_at <= due_date` alone would call a task punctual even if the deadline had been
+  moved to stay ahead of it. Deadline moves are counted per person and shown next to the rate.
+- Flow counts **handovers only** — self-assigned work would swamp it and says nothing about
+  work moving between people.
+- `is_admin()` is global, not per-department. If a second department ever needs its own admin,
+  `access_level` would need a department dimension.
+
 ## Migration order
 
 `supabase-schema.sql` → `commitments` → `participants` → `transcripts` → `delete-meetings` →
 `weekly-tracker` → `notifications` → `access-control` → `departments` → `subtasks` → `rocks`
+→ `metrics`
 
 Run in that order; each depends on the ones before it. All are applied in production.
