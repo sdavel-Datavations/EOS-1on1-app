@@ -107,10 +107,12 @@ Optional. Skip and the app works, minus the reminders.
 6. **App Home** > Show Tabs > **Messages Tab** on, and tick *Allow users to send
    Slash commands and messages from the messages tab*.
 
-   Without this Slack refuses to let anyone type in the DM at all — the thread
-   shows "Sending messages to this app has been turned off" and the reply never
-   reaches step 5's subscription. Nothing in the app or its logs can tell you
-   this; the message only appears in Slack.
+   **The toggle alone is not enough.** It only makes the tab visible; the
+   checkbox under it is the permission to type, and it stays unticked when you
+   flip the toggle. With the tab on and the box clear, the thread still shows
+   "Sending messages to this app has been turned off" and the reply never reaches
+   step 5's subscription. Nothing in the app or its logs can tell you this; the
+   message only appears in Slack.
 7. **Interactivity & Shortcuts** > on. Request URL:
    `https://YOUR-DOMAIN/api/slack/interactive`
 

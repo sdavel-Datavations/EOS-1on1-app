@@ -23,7 +23,7 @@ that notices when a week gets skipped.
 |---|---|
 | Email notifications | **Working.** 4 successful sends. Two bugs fixed to get there: a doubled `@` in `NOTIFY_FROM_EMAIL`, then an unverified Resend domain. |
 | Slack DM + **Mark done button** | **Working.** Confirmed `closed via slack_button`. |
-| Slack **reply “done”** | **Never once.** 0 tasks have `completed_via = 'slack_reply'`. Blocked on Slack → App Home → Show Tabs → **Messages Tab** being off. |
+| Slack **reply “done”** | **Never once.** 0 tasks have `completed_via = 'slack_reply'`. Blocked in Slack → App Home → Show Tabs: the Messages Tab toggle only shows the tab, and the **checkbox under it** — *Allow users to send Slash commands and messages* — is the permission to type. |
 | Nightly cron | **Never observed.** 0 heartbeat rows. One should appear the first weekday after a deploy, at 13:00 UTC. Watch the Delivery panel on `/metrics`. |
 | Assigner confirmation DM | **Never fired.** Needs a creator and assignee who are different people, both on Slack. |
 | Metrics dashboard | **Proven** against seeded data with a manager and a report; figures checked by hand. |
@@ -32,7 +32,8 @@ that notices when a week gets skipped.
 
 ## Next steps, in order
 
-1. **Slack Messages Tab on** → reply `done` and confirm `completed_via = 'slack_reply'`.
+1. **Slack Messages Tab on, and its checkbox ticked** → reply `done` and confirm
+   `completed_via = 'slack_reply'`.
 2. **Invite Ashley** at `/team` — email, department Marketing, manager Sam. Signup is
    invite-only. This converts a dozen built-but-never-run features into working or broken.
 3. **Set a schedule** for her on `/team`, then hold the first real 1-on-1 — with her email in
