@@ -9,7 +9,8 @@ that notices when a week gets skipped.
 
 ## State as of 2026-08-19
 
-- **14 migrations, all applied.** 304 tests pass. `npm run build` and `npm run lint` clean.
+- **14 migrations, all applied.** 304 tests pass. `npm run build` is clean; `npm run lint`
+  is not, and never has been — see the last item under Known gaps.
 - **Everything is pushed.** Nothing local.
 - **One real account:** sam@datavations.com — `access_level` admin, department Marketing,
   Slack linked. Nobody else has been invited.
@@ -194,5 +195,11 @@ project for tests is the actual fix** — worth doing before anyone else's data 
 - **No first-run empty states.** A new user's first login is a blank dashboard.
 - **No per-task audit UI.** `commitment_events` records due-date and owner changes but nothing
   displays the history.
-- 17 pre-existing lint errors, all the same `react-hooks/set-state-in-effect` pattern every
-  data hook in the codebase uses.
+- **19 lint errors, none of them new work.** `npm run lint` has never been clean, so a
+  non-zero exit is not a signal that something just broke — read the list, don't count it:
+  - 12 × `react-hooks/set-state-in-effect` — the pattern every data hook in the codebase uses.
+  - 5 × `no-explicit-any`, 1 × `react/no-unescaped-entities` — cosmetic.
+  - 1 × React Compiler *"Cannot call impure function during render"* on `Date.now()` at
+    `src/app/meeting/[id]/page.tsx:128`. **Checked: a false positive.** It sits in
+    `startMeeting`, which is reached only from `onClick` — the rule can't prove that. Don't
+    "fix" it by suppressing the rule; the rule is right about everywhere else.
