@@ -1,233 +1,198 @@
-# eos-1on1-app — where things stand
+# eos-1on1-app — handoff
 
-Live: https://eos-1on1-app.vercel.app
-Next 16.3.1 · React 19 · Supabase · Tailwind v4
+An EOS-style weekly 1-on-1 app: agendas, tasks, accountability metrics, and a cadence
+that notices when a week gets skipped.
 
-## State
+- **Live:** https://eos-1on1-app.vercel.app
+- **Stack:** Next 16.3.1 · React 19 · Supabase (Postgres + RLS + Auth) · Tailwind v4 · Playwright
+- **Notifications:** Slack DM + email (Resend). No AI/LLM dependency anywhere.
 
-- All 12 migrations applied. All commits pushed and deployed.
-- 173 tests pass; `npm run build` clean.
-- Owner account: sam@datavations.com — `access_level` admin, department Marketing, Slack linked.
-- Database is essentially empty: 1 profile, 0 meetings, 1 task. **Ashley has not been invited.**
+## State as of 2026-08-19
+
+- **14 migrations, all applied.** 304 tests pass. `npm run build` and `npm run lint` clean.
+- **Everything is pushed.** Nothing local.
+- **One real account:** sam@datavations.com — `access_level` admin, department Marketing,
+  Slack linked. Nobody else has been invited.
+- **The database is empty of content:** 0 tasks, 0 meetings, 0 schedules, 0 Rocks, 0 issues.
+  Every feature below is built and tested; almost none has been used in earnest.
+
+## What is proven, and what is not
+
+| Path | Status |
+|---|---|
+| Email notifications | **Working.** 4 successful sends. Two bugs fixed to get there: a doubled `@` in `NOTIFY_FROM_EMAIL`, then an unverified Resend domain. |
+| Slack DM + **Mark done button** | **Working.** Confirmed `closed via slack_button`. |
+| Slack **reply “done”** | **Never once.** 0 tasks have `completed_via = 'slack_reply'`. Blocked on Slack → App Home → Show Tabs → **Messages Tab** being off. |
+| Nightly cron | **Never observed.** 0 heartbeat rows. One should appear the first weekday after a deploy, at 13:00 UTC. Watch the Delivery panel on `/metrics`. |
+| Assigner confirmation DM | **Never fired.** Needs a creator and assignee who are different people, both on Slack. |
+| Metrics dashboard | **Proven** against seeded data with a manager and a report; figures checked by hand. |
+| Cadence / skipped weeks | **Proven** against seeded data. |
+| Anything multi-person | **Only ever run with synthetic test accounts.** |
+
+## Next steps, in order
+
+1. **Slack Messages Tab on** → reply `done` and confirm `completed_via = 'slack_reply'`.
+2. **Invite Ashley** at `/team` — email, department Marketing, manager Sam. Signup is
+   invite-only. This converts a dozen built-but-never-run features into working or broken.
+3. **Set a schedule** for her on `/team`, then hold the first real 1-on-1 — with her email in
+   Direct Report, or the cadence panel counts it missed (see below).
+4. **Add a Q3 Rock** for her; confirm it appears in the *next* meeting without being copied.
+5. **Watch `/metrics` → Delivery** for the first cron heartbeat.
 
 ## Env vars in Vercel
 
 Set: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`,
 `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`, `ACTION_TOKEN_SECRET`, `CRON_SECRET`,
-`RESEND_API_KEY`, `NOTIFY_FROM_EMAIL`.
+`RESEND_API_KEY`, `NOTIFY_FROM_EMAIL` (`noreply@marketing.task.datavations.com`).
 
 Not set: `NEXT_PUBLIC_APP_URL` (optional — falls back to `VERCEL_PROJECT_PRODUCTION_URL`).
 
-There is no Anthropic key and no LLM dependency.
+`.env.local` holds **only** Supabase keys, `ACTION_TOKEN_SECRET` and `CRON_SECRET` — no Slack
+or Resend credentials, so **neither Slack nor email can send from localhost.** A non-send in
+dev proves nothing; test those on the deployed app.
 
-## Unverified paths
-
-1. **Slack "reply done" has never been proven end to end.** Slack App Home → Show Tabs →
-   Messages Tab is OFF, so the DM reads "Sending messages to this app has been turned off"
-   and `done` cannot be typed. Turn it on, tick *Allow users to send Slash commands and
-   messages from the messages tab*, then reply `done` and confirm
-   `weekly_commitments.completed_via = 'slack_reply'` with the right `completed_by`.
-2. **The Slack "Mark done" button works** — confirmed `[slack/complete/ok] closed via
-   slack_button` — but the message-redraw fix deployed *after* that click. Press it again on
-   the old message; it now self-heals.
-3. ~~**Email**~~ — **working as of 2026-08-19.** Confirmed end to end: a real send returned
-   `{slack: "sent", email: "sent"}` with a `channel=email status=sent` row in
-   `notification_log`. Two causes, fixed in order: a doubled `@` in `NOTIFY_FROM_EMAIL`
-   (`noreply@@marketing.task.datavations.com`), then the sending domain not being verified in
-   Resend. The DNS was already correct — MX to `feedback-smtp.us-east-1.amazonses.com`, SPF,
-   and the `resend._domainkey` DKIM record all present on `marketing.task.datavations.com`;
-   what was missing was verification on the Resend side.
-   Note `RESEND_API_KEY` and `NOTIFY_FROM_EMAIL` are **not** in `.env.local`, so email still
-   never sends on localhost — test it on the deployed app.
-4. **The agenda, Rocks and Import Next Steps have never run against real data.** One solo
-   meeting exists (no report), zero Rocks, zero issues, zero to-dos.
-5. **The assigner confirmation DM has never fired.** It needs a creator and an assignee who are
-   different people and both on Slack, and only one real account exists. It will first run when
-   Sam assigns Ashley something.
-
-## Next steps, in order
-
-1. Slack Messages Tab on → prove the reply path. **This is now the only unproven channel.**
-2. Invite Ashley at `/team` — her email, manager Sam, department Marketing. Signup is
-   invite-only; she cannot register without this.
-3. Create the first real meeting, her email in Direct Report.
-4. Add a Q3 Rock for her in Scorecard & Rock Pulse; confirm it shows in the *next* meeting too,
-   without having been copied.
-5. Verify the email path per (3) above.
-
-## Testing traps worth remembering
-
-- **A hook after an early return takes the whole page down.** `useSchedules` placed below
-  `if (!user) return` crashed `/team` completely — and the suite stayed green, because no test
-  asserted that page renders for a signed-in user. Hooks go above every early return.
-- **A green suite is not proof a page renders.** Assert on real content, not just on API
-  responses and error messages.
-
-- **`.first()` on a board with more than one task attaches work to the wrong parent**, and
-  every assertion still passes because the subtask does exist — just not where the test meant.
-  Scope to `data-testid="task-group"` or `data-testid="task-row"` and filter by title.
-- **Success notices quote the task title back**, so `getByText('<title>')` matches the notice
-  rather than the row. Assert on rows (`getByTestId('task-row').filter({ hasText })`) when
-  checking whether something is gone.
-- **Killing a run skips `globalTeardown`**, leaving `@example.com` accounts in the live
-  database. Run the teardown by hand afterwards:
-  `npx tsx -e "import t from './tests/global-teardown'; (t as any)()"`.
-- The suite occasionally fails a batch on Supabase slowness — logins time out and `Sign out`
-  never appears. Re-run the failures before believing them.
-
-## Conventions to keep
-
-- **Probe the live database before trusting a schema file.** `profiles.role` already existed
-  with values the new check constraint would have rejected, which would have aborted an entire
-  migration. That was caught by probing, not by reading.
-- **Every migration-dependent test is skip-gated** on a column probe (`trackerReady`,
-  `subtasksReady`, `invitationsReady`, `tableExists`) so the suite is green both before and
-  after a migration. Do the same for new columns.
-- **Global teardown deletes every `@example.com` account and its data** after each run
-  (`tests/global-teardown.ts`). Never widen that pattern — example.com is IANA-reserved,
-  which is the whole reason it is a safe boundary. `SKIP_TEST_CLEANUP=1` keeps data while
-  debugging.
-- **RLS decides visibility; never re-filter the same rule in the query.** A duplicate
-  client-side filter silently hid departmental and oversight tasks — the policy was correct
-  and the app simply never asked.
-- **Oversight (manager / admin / department) is read-only**, via separate `FOR SELECT`
-  policies. Don't widen the `FOR ALL` participation policies to grant it.
-- **Never let a missing env var throw.** `tryServiceClient()` exists because an unhandled
-  throw returned a 500 with an empty body and cost an hour to diagnose.
-- **Dates are compared as `YYYY-MM-DD` strings, never parsed into `Date`.** Parsing shifts by
-  the UTC offset and breaks due dates and quarter boundaries west of Greenwich.
-- **`notification_log` is the first place to look** when a notification silently fails.
-- `rm -rf .next` while `next dev` is running kills the dev server; Playwright then fails with
-  `fetch failed`. Restart with `npm run dev`.
-
-## Architecture notes
-
-- `weekly_commitments` holds **both** mid-week tasks (`meeting_id` null) and 1-on-1
-  commitments. Departmental sharing and subtasks apply to standalone tasks only — 1-on-1
-  commitments can be performance material.
-- **Open Work** lives inside **To-Dos & Wrap** (section 5), which is the EOS to-do review —
-  so it is on that section's 5-minute clock and collapsed until the section is opened. It
-  reads every still-open task belonging to the people in that meeting — mid-week tasks and unfinished commitments from earlier 1-on-1s —
-  and deliberately excludes that meeting's own commitments, which have their own section.
-  Read, never copied: a copy would fork the task, so closing one side would leave the other
-  open. `src/lib/open-work.ts` holds the pure logic; `useOpenWork` does the query.
-- Rocks live in `rocks`, keyed by (owner_id, quarter), and are **read** by every agenda in
-  that quarter rather than copied into it. `rock_checkins` holds the weekly pulse, unique per
-  (rock, meeting).
-- **Reassigning a task** goes through `/api/tasks/reassign`, not a direct column write. The
-  previous owner's Slack DM has to be retired first: its Mark done button closes by commitment
-  id rather than by who pressed it, so a live button in the old owner's DM lets them close work
-  that is no longer theirs. The route also clears `notified_at` and the Slack pointers so the
-  new owner is actually told and a "done" reply lands on the new thread.
-- **A changed due date redraws the existing Slack message** rather than sending a second DM
-  about the same task — `reopenedBlocks` carries the current due label for exactly this.
-- **Subtasks have their own due dates**, pre-filled from the parent but independent, because
-  work runs in stages and a piece waiting on someone else is rarely due when the whole is.
-- **A quiet confirmation DM goes to whoever handed out a task**, once the assignee's DM has
-  actually landed, and only when it went to someone else. No button, no thread — a courtesy
-  note, not a second stream to keep up with. Failures are logged and swallowed: the assignee
-  has the task either way.
-- **Finished commitments drop off the meeting's open list** into a collapsed `Done · N`
-  section. Not deleted from view entirely — a 1-on-1 is partly a review of what got finished.
-  Open Work already excluded done tasks by construction.
-- **Notes and context** live in the existing `weekly_commitments.description` column, so no
-  migration was needed. Set them when creating a task, or add and edit them in place on any
-  row. They travel with the task into the Slack DM and the email — context that stays in the
-  app is context the assignee never sees.
-- **Deleting a task** is allowed by the existing `FOR ALL` policy: the assignee, the creator,
-  or anyone in the task's 1-on-1. Departmental and oversight viewers stay read-only, which is
-  the point of those being separate `FOR SELECT` policies. `parent_id` is `ON DELETE CASCADE`,
-  so deleting a main task removes its subtasks — the confirmation says how many, because that
-  is not recoverable. `deleteCommitment` selects the row back, since an RLS-refused delete
-  removes no rows and reports no error, which is otherwise indistinguishable from success.
-- Subtasks are one level deep, enforced by a trigger, and **assignable to anyone in the owner
-  dropdown** (people you share a meeting with). A piece kept for whoever owns the main task is
-  silent; a piece handed to someone else is notified, so one handover is one DM rather than
-  five. It inherits the parent's due date.
-- **An orphaned subtask must never disappear.** Hand someone one piece of a task whose parent
-  RLS does not show them, and that row is neither top level nor drawn by a parent — it renders
-  nowhere, which is work assigned to someone that they can never see. `isTopLevel()` in
-  `src/lib/open-work.ts` is the single rule, used by both the task board and the agenda panel.
-- Slack message state is redrawn from the row by `syncSlackMessage()`; all four close paths
-  (app, email link, Slack reply, Slack button) go through it.
-- No AI/LLM dependency. "Import Next Steps" parses the action-item list Granola or Gemini
-  already produced — `src/lib/parse-action-items.ts`.
-
-## Cadence and skipped weeks (`meeting_schedules`)
-
-- A schedule says when a 1-on-1 was **expected**; a real meeting row says one **happened**. The
-  gap between the two is the entire feature.
-- **Nothing auto-creates meetings, deliberately.** A row written by a scheduler would be
-  indistinguishable from one somebody held, so the schedule would erase the very gaps it
-  exists to reveal.
-- **Held is matched by week, not by exact date.** A Wednesday slot moved to Thursday is the same
-  1-on-1; marking it missed would make the figure measure punctuality rather than whether
-  people are actually meeting.
-- **Weeks before the schedule existed are not misses.** A cadence set today would otherwise
-  open with "missed 8 of the last 8" — untrue, and the fastest way to get the panel ignored.
-  Clamped to `meeting_schedules.created_at`.
-- **A meeting only counts if the pair matches**, so a solo agenda (no report) does not count as
-  that person's 1-on-1. Start the 1-on-1 with their email in Direct Report or it reads as
-  missed.
-- **Today is never missed yet** — the 1-on-1 may still be this afternoon, and flagging it at
-  breakfast would make the current week always look bad.
-- Only the **manager side** (or an admin, or someone above them) can create or change a
-  schedule. Being someone's report does not come with the authority to reschedule your own
-  review — the same reasoning as due dates belonging to whoever assigned the work.
-- `weekday` is 0-6 with **0 = Sunday**, matching `getUTCDay()`, so the app needs no conversion.
-- Set it on `/team`; it shows on the dashboard as a **Cadence** panel.
-- **Calendar (Google) sync was deliberately not built.** It needs OAuth refresh tokens with
-  calendar scope stored server-side, and it still would not say whether the 1-on-1 *happened* —
-  only that it was on a calendar. In-app scheduling answers both questions with no credentials.
-  Worth adding on top later, not instead.
-
-## Is the notification system actually running?
-
-- The nightly cron writes a **heartbeat** to `notification_log` on every scheduled pass —
-  including the quiet ones, and including the ones that fail because no channel is
-  configured. Without it a run that finds nothing due looked exactly like a cron that never
-  fired, and the difference is the whole notification system silently not working.
-- A **manual** send deliberately writes no heartbeat, or pressing Notify would report a
-  scheduled run.
-- `/metrics` shows a **Delivery** panel to admins: the last scheduled run, and any delivery
-  failures. `notification_log` is readable through RLS only for rows about yourself, which is
-  right for a member and useless for whoever has to notice a DM to somebody else failed — so
-  `/api/notifications/recent` reads it with the service role behind an admin check.
-- **As of 2026-08-19 no heartbeat exists**, so the scheduled run has still never been observed
-  in production. One will appear the first weekday after this deploys, at 13:00 UTC.
-
-## Metrics dashboard (`/metrics`)
-
-- Scope comes from `team_ids()`, **not** from reading `profiles`. `can_view_profile` is
-  deliberately wider — it also grants anyone you share a meeting with — and a peer's numbers
-  are not a manager's business. Authority flows down the reporting line only, plus everything
-  for an admin. `team_ids()` is recursive with the same depth cap `manages()` uses.
-- **On time** is `completed_at::date <= due_date`. A task with no due date is neither on time
-  nor late and sits outside the figure entirely — counting those as punctual would flatter
-  everyone, since a task can be created with no date at all.
-- **`onTimeRate` returns null below four judged tasks.** One late out of three reads as 33% and
-  swings to 0% next week; a blank misleads less than a number that moves that much.
-- **`commitment_events` is what keeps it honest.** Due dates are editable, so
-  `completed_at <= due_date` alone would call a task punctual even if the deadline had been
-  moved to stay ahead of it. Deadline moves are counted per person and shown next to the rate.
-- **Any date range, 30 days by default.** Presets only fill the two date inputs in; the dates
-  are the source of truth. A preset means exactly N days *including today*, because a button
-  reading "7 days" above a card reading `Closed / 8d` is the kind of small lie that makes
-  people stop trusting the rest of the page.
-- **Comparison is against the equal-length window ending the day before** — same length rather
-  than the previous calendar month, so neither period is flattered by simply being longer.
-  Only closed work is compared: open, overdue and oldest-open describe today, not a period.
-  A delta is suppressed when either window is below the four-task minimum, since comparing a
-  number against "not enough data" invents a trend.
-- Flow counts **handovers only** — self-assigned work would swamp it and says nothing about
-  work moving between people.
-- `is_admin()` is global, not per-department. If a second department ever needs its own admin,
-  `access_level` would need a department dimension.
+Vercel cron: `/api/notify` at `0 13 * * 1-5` (13:00 UTC, weekdays), in `vercel.json`.
 
 ## Migration order
+
+Run in this order; each depends on the ones before it. All 14 are applied.
 
 `supabase-schema.sql` → `commitments` → `participants` → `transcripts` → `delete-meetings` →
 `weekly-tracker` → `notifications` → `access-control` → `departments` → `subtasks` → `rocks`
 → `metrics` → `schedules`
 
-Run in that order; each depends on the ones before it. All are applied in production.
+(That is 13 names for 14 files — `supabase-schema.sql` plus 13 others.)
+
+## How the pieces fit
+
+**Tasks.** `weekly_commitments` holds *both* mid-week tasks (`meeting_id` null) and
+commitments raised in a 1-on-1. Departmental sharing and subtasks apply to standalone tasks
+only — a 1-on-1 commitment can be performance material.
+
+- Subtasks are **one level deep** (trigger-enforced), **assignable**, and carry **their own
+  due dates** (pre-filled from the parent, then independent — work runs in stages).
+- **Notes** live in `description` and travel into the Slack DM and the email. Context that
+  stays in the app is context the assignee never reads.
+- **Due dates are the assigner's to change** — enforced by a trigger, since RLS cannot
+  restrict which columns an UPDATE touches. Admins are exempt so a task created by someone
+  who has left can still be corrected. Delegating a task onward stays open to whoever holds it.
+- **Reassignment** goes through `/api/tasks/reassign`, never a direct column write: the old
+  owner's Slack DM has to be retired first, because its Mark done button closes by task id
+  rather than by who pressed it.
+- **An orphaned subtask must never disappear.** Hand someone one piece of a task whose parent
+  RLS hides, and that row is neither top-level nor drawn by a parent. `isTopLevel()` in
+  `src/lib/open-work.ts` is the single rule, used by the task board and the agenda alike.
+
+**Agenda.** Five timed EOS sections. **Open Work** sits inside To-Dos & Wrap — that section
+*is* the EOS to-do review — and reads every still-open task belonging to the people in the
+meeting, excluding that meeting's own commitments. Read, never copied.
+
+**Rocks** live in `rocks` keyed by (owner_id, quarter) and are **read** by every agenda that
+quarter rather than copied. `rock_checkins` holds the weekly pulse.
+
+**Issues** carry forward until resolved, and can now *be* resolved — `resolved` was a column
+with nothing setting it, so carrying them forward without that would have made every issue
+immortal.
+
+**Metrics** (`/metrics`). Scope comes from `team_ids()`, **not** from reading `profiles`:
+`can_view_profile` also grants anyone you share a meeting with, and a peer's numbers are not a
+manager's business. Recursive, so a department head inherits their reports' reports.
+
+- **On time** = `completed_at::date <= due_date`. Undated work is neither on time nor late and
+  sits outside the figure — counting it as punctual would flatter everyone.
+- **The rate is blank below four judged tasks.** One late out of three reads as 33% and swings
+  to 0% next week.
+- **`commitment_events`** records due-date and owner changes, so the metric cannot be gamed by
+  moving a deadline. Deadline moves show next to the rate.
+- Comparison is against the **equal-length** window ending the day before. Only closed work is
+  compared — open/overdue/oldest describe today, not a period. A delta is suppressed when
+  either window is below the minimum.
+- Flow counts **handovers only**.
+- `is_admin()` is **global**, not per-department. A second department needing its own admin
+  would need a department dimension on `access_level`.
+
+**Cadence** (`meeting_schedules`). A schedule says when a 1-on-1 was *expected*; a meeting row
+says one *happened*. The gap is the feature.
+
+- **Nothing auto-creates meetings.** A scheduler's row would be indistinguishable from a
+  meeting somebody held, erasing the very gaps this reveals.
+- **Held is matched by week**, not by exact date — a Wednesday moved to Thursday is the same
+  1-on-1.
+- **A solo agenda does not count.** Matching is on the (manager, report) pair, so *Start
+  1-on-1* with Direct Report blank will read as a missed week.
+- **Weeks before the schedule existed are not misses** (clamped to `created_at`), and **today
+  is never missed yet**.
+- Only the **manager side** (or an admin) can set or change one.
+- Google Calendar sync was considered and **not** built: OAuth refresh tokens with calendar
+  scope held server-side, and it still would not say whether the 1-on-1 *happened*. A sensible
+  addition on top later, not instead.
+
+**Delivery visibility.** Every scheduled run writes a heartbeat to `notification_log` —
+including quiet runs and ones that fail for want of a channel — because a run that sends
+nothing used to write nothing, making "never fired" and "fired quietly" identical. A *manual*
+send deliberately writes none. `/metrics` shows admins the last run and any failures via
+`/api/notifications/recent` (service role behind an admin check, since the table's RLS only
+exposes rows about yourself).
+
+## Conventions to keep
+
+- **Probe the live database before trusting a schema file.** `profiles.role` already existed
+  with values a new check constraint would have rejected, which would have aborted an entire
+  migration.
+- **Every migration-dependent test is skip-gated** on a probe (`trackerReady`, `subtasksReady`,
+  `metricsReady`, `schedulesReady`, `tableExists`) so the suite is green before and after.
+- **RLS decides visibility; never re-filter the same rule in the query.** A duplicate
+  client-side filter silently hid departmental and oversight tasks.
+- **Oversight is read-only**, via separate `FOR SELECT` policies. Don't widen `FOR ALL`.
+- **Never let a missing env var throw.** `tryServiceClient()` exists because an unhandled throw
+  returned a 500 with an empty body.
+- **Detect an RLS refusal.** A blocked UPDATE or DELETE affects no rows and reports no error —
+  indistinguishable from success. Always `.select()` back and check.
+- **Dates are compared as `YYYY-MM-DD` strings, never parsed into `Date`.** `new
+  Date('2026-08-20')` is UTC midnight, which is the 19th west of Greenwich. This has caused
+  real bugs twice: overdue styling, and meetings filed a day late by `toISOString()`.
+- **`notification_log` is the first place to look** when a notification silently fails.
+- `rm -rf .next` under a running `next dev` kills the dev server; Playwright then fails with
+  `fetch failed`.
+
+## Testing traps worth remembering
+
+- **A hook after an early return takes the whole page down.** `useSchedules` below
+  `if (!user) return` crashed `/team` entirely — and the suite stayed green, because no test
+  asserted that page renders for a signed-in user. Hooks go above every early return.
+- **A green suite is not proof a page renders.** Assert on real content, not only on API
+  responses and error strings.
+- **`.first()` on a board with more than one item attaches work to the wrong parent**, and
+  every assertion still passes. Scope to `data-testid="task-group"` / `task-row`.
+- **Success notices quote the title back**, so `getByText('<title>')` matches the notice rather
+  than the row. Assert on rows when checking something is gone.
+- **`getByLabel` substring-matches case-insensitively**, and Next's dev overlay is labelled
+  "Open Next.js Dev Tools" — so `getByLabel('To')` matches it. Use `{ exact: true }`.
+- **Killing a run skips `globalTeardown`**, leaving `@example.com` accounts in the live
+  database. Run it by hand:
+  `npx tsx -e "import t from './tests/global-teardown'; (t as any)()"`.
+- The suite occasionally fails a batch on Supabase slowness — logins time out and `Sign out`
+  never appears. Re-run before believing it.
+
+## The one operational risk
+
+**The test suite runs against the production Supabase project.** That is how 8 test accounts
+were once left in the live database, and how misleading cron heartbeats were nearly left in
+the log. The teardown is narrow and `example.com` is IANA-reserved, but **a second Supabase
+project for tests is the actual fix** — worth doing before anyone else's data is in there.
+
+## Known gaps, not yet built
+
+- **Three overlapping task concepts on one agenda:** `todos`, Weekly Commitments, Open Work.
+  Recommendation: retire the `todos` section — commitments notify, close from Slack, appear on
+  `/tasks` and feed the metrics; `todos` do none of that, and the table has 0 rows. Not done
+  because it deletes a visible feature.
+- **No meeting-prep digest.** Considered and deferred: the agenda's content (headlines,
+  scorecard, segue) is all manually typed and currently empty, so a digest would mostly
+  announce blanks.
+- **No recurring meeting creation** — deliberately, see Cadence above.
+- **No first-run empty states.** A new user's first login is a blank dashboard.
+- **No per-task audit UI.** `commitment_events` records due-date and owner changes but nothing
+  displays the history.
+- 17 pre-existing lint errors, all the same `react-hooks/set-state-in-effect` pattern every
+  data hook in the codebase uses.

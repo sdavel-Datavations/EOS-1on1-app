@@ -50,10 +50,27 @@ export default async function globalTeardown() {
   for (const c of chunks(testUsers.map(p => p.email as string), 100)) {
     await sb.from('invitations').delete().in('email', c)
   }
+
+  /*
+   * Invitations that never became accounts.
+   *
+   * The loop above only clears invitations for test users it found as profiles, so
+   * an invite that was recorded and never signed up survived every run and
+   * accumulated in the live table. Matched on the address rather than on a profile,
+   * since by definition there is no profile to match.
+   */
+  const { data: strayInvites } = await sb
+    .from('invitations')
+    .delete()
+    .like('email', '%@example.com')
+    .select('email')
   for (const id of ids) {
     await sb.auth.admin.deleteUser(id)
   }
 
   // eslint-disable-next-line no-console
-  console.log(`\n[teardown] removed ${ids.length} test account(s) and their data`)
+  console.log(
+    `\n[teardown] removed ${ids.length} test account(s) and their data` +
+    (strayInvites?.length ? `, plus ${strayInvites.length} unused invitation(s)` : ''),
+  )
 }
