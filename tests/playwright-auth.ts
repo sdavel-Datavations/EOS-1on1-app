@@ -25,6 +25,11 @@ function loadDotenvIfNeeded() {
   }
 }
 
+/** Makes .env.local values available to a test, for the cron secret. */
+export function loadEnv() {
+  loadDotenvIfNeeded()
+}
+
 export function baseUrl() {
   return process.env.DEPLOY_URL || 'http://localhost:3000'
 }

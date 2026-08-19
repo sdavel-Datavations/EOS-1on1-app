@@ -147,6 +147,21 @@ There is no Anthropic key and no LLM dependency.
 - No AI/LLM dependency. "Import Next Steps" parses the action-item list Granola or Gemini
   already produced — `src/lib/parse-action-items.ts`.
 
+## Is the notification system actually running?
+
+- The nightly cron writes a **heartbeat** to `notification_log` on every scheduled pass —
+  including the quiet ones, and including the ones that fail because no channel is
+  configured. Without it a run that finds nothing due looked exactly like a cron that never
+  fired, and the difference is the whole notification system silently not working.
+- A **manual** send deliberately writes no heartbeat, or pressing Notify would report a
+  scheduled run.
+- `/metrics` shows a **Delivery** panel to admins: the last scheduled run, and any delivery
+  failures. `notification_log` is readable through RLS only for rows about yourself, which is
+  right for a member and useless for whoever has to notice a DM to somebody else failed — so
+  `/api/notifications/recent` reads it with the service role behind an admin check.
+- **As of 2026-08-19 no heartbeat exists**, so the scheduled run has still never been observed
+  in production. One will appear the first weekday after this deploys, at 13:00 UTC.
+
 ## Metrics dashboard (`/metrics`)
 
 - Scope comes from `team_ids()`, **not** from reading `profiles`. `can_view_profile` is

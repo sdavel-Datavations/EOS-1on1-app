@@ -1,5 +1,5 @@
 import { test, expect, Page } from '@playwright/test'
-import { seedAndLogin, createUser, invite, invitationsReady, login, baseUrl, tableExists, commitmentsTableExists, participantsTableExists, trackerReady, subtasksReady, backdateMeeting, metricsReady } from './playwright-auth'
+import { seedAndLogin, createUser, invite, invitationsReady, login, baseUrl, tableExists, commitmentsTableExists, participantsTableExists, trackerReady, subtasksReady, backdateMeeting, metricsReady, loadEnv } from './playwright-auth'
 import { describeDue, todayISO } from '../src/lib/tracker'
 
 async function signInAndStartMeeting(page: Page, name = 'E2E User') {
@@ -1104,4 +1104,80 @@ test('metrics show your own numbers and say when scope is just you', async ({ pa
   await page.getByRole('checkbox', { name: /Compare with the previous/ }).check()
   await expect(page.getByText(/22 Jul 2026 – 31 Jul 2026/)).toBeVisible()
   await expect(page.getByText(/Only closed work is compared/)).toBeVisible()
+})
+
+test('the delivery log is admins only', async ({ page, request }) => {
+  // Anonymous first: an unauthenticated caller should learn nothing.
+  const anon = await request.get(`${baseUrl()}/api/notifications/recent`)
+  expect(anon.status()).toBe(401)
+
+  // A signed-in member is refused too. notification_log is readable through RLS
+  // only for rows about yourself, so this route uses the service role — the admin
+  // check is the entire access control.
+  await seedAndLogin(page, `member+${Date.now()}@example.com`, 'Password123!', 'Plain Member')
+  const asMember = await page.evaluate(async () => {
+    const res = await fetch('/api/notifications/recent')
+    return { status: res.status, body: await res.json() }
+  })
+  expect(asMember.status).toBe(403)
+  expect(JSON.stringify(asMember.body)).toContain('Admins only')
+
+  // And the panel is not on the page for them
+  await page.goto('/metrics')
+  await expect(page.getByRole('heading', { name: 'Accountability' })).toBeVisible({ timeout: 15000 })
+  await expect(page.getByText('Delivery')).toHaveCount(0)
+})
+
+test('a scheduled run leaves a heartbeat even when it cannot send', async ({ request }) => {
+  loadEnv()
+  const secret = process.env.CRON_SECRET
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
+  test.skip(!secret || !url || !key, 'needs CRON_SECRET and the service role key to verify the log')
+
+  const before = new Date().toISOString()
+
+  // Reachable only with the secret
+  const unauthorised = await request.get(`${baseUrl()}/api/notify`)
+  expect(unauthorised.status()).toBe(401)
+
+  // The scheduled path. Locally no channel is configured, so this returns 500 —
+  // and that is exactly the case that must still be recorded.
+  const res = await request.get(`${baseUrl()}/api/notify`, {
+    headers: { Authorization: `Bearer ${secret}` },
+  })
+  expect([200, 500]).toContain(res.status())
+
+  const log = await request.get(
+    `${url}/rest/v1/notification_log?select=created_at,event,status,detail` +
+    `&event=eq.run&created_at=gte.${before}&order=created_at.desc`,
+    { headers: { apikey: key!, Authorization: `Bearer ${key}` } },
+  )
+  const rows = await log.json()
+  // A run that sends nothing used to write nothing at all, which made "never
+  // fired" and "fired quietly" the same thing in the log.
+  expect(rows.length).toBeGreaterThan(0)
+  expect(rows[0].detail).toContain('cron:')
+
+  // A manual send must not leave one, or the panel would claim a scheduled run
+  // every time somebody pressed Notify.
+  const manualBefore = new Date().toISOString()
+  await request.post(`${baseUrl()}/api/notify`, {
+    headers: { Authorization: `Bearer ${secret}`, 'Content-Type': 'application/json' },
+    data: {},
+  })
+  const after = await request.get(
+    `${url}/rest/v1/notification_log?select=created_at&event=eq.run&created_at=gte.${manualBefore}`,
+    { headers: { apikey: key!, Authorization: `Bearer ${key}` } },
+  )
+  expect((await after.json()).length).toBe(0)
+
+  // Remove the heartbeats this test wrote. They say "no channel configured", which
+  // is true on a dev machine and false in production — and the admin panel reads
+  // the newest one, so leaving them behind would make it report a failure that
+  // never happened to anybody.
+  await request.delete(
+    `${url}/rest/v1/notification_log?event=eq.run&created_at=gte.${before}`,
+    { headers: { apikey: key!, Authorization: `Bearer ${key}` } },
+  )
 })

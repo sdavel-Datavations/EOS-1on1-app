@@ -58,7 +58,10 @@ export async function GET(req: Request) {
   if (!hasCronSecret(req)) {
     return NextResponse.json({ error: 'This endpoint requires the cron secret' }, { status: 401 })
   }
-  return run()
+  // Marked as the scheduled pass so it can leave a heartbeat. A run that finds
+  // nothing to send writes nothing otherwise, which makes "working" and "never
+  // fired" indistinguishable in the log.
+  return run(undefined, 'cron')
 }
 
 /**
@@ -100,11 +103,22 @@ export async function POST(req: Request) {
   return run(commitmentId)
 }
 
-async function run(commitmentId?: string) {
+async function run(commitmentId?: string, source: 'cron' | 'manual' = 'manual') {
+  // The service client comes first so a scheduled pass can leave a heartbeat even
+  // when it cannot send anything. Bailing out before writing one would mean a cron
+  // that ran and failed looked identical to a cron that never ran — which is the
+  // exact ambiguity the heartbeat exists to remove.
+  const service = tryServiceClient()
+  if (!service.ok) return NextResponse.json({ error: service.error }, { status: 500 })
+  const sb = service.sb
 
   const slackOn = slackConfigured()
   const mailOn = mailConfigured()
   if (!slackOn && !mailOn) {
+    const detail = 'cron: no channel configured — set SLACK_BOT_TOKEN or RESEND_API_KEY + NOTIFY_FROM_EMAIL'
+    if (source === 'cron') {
+      await logNotification(sb, { channel: 'app', event: 'run', status: 'failed', detail })
+    }
     return NextResponse.json(
       { error: 'Neither Slack nor email is configured. Set SLACK_BOT_TOKEN + SLACK_SIGNING_SECRET, or RESEND_API_KEY + NOTIFY_FROM_EMAIL.' },
       { status: 500 },
@@ -113,10 +127,6 @@ async function run(commitmentId?: string) {
 
   const today = todayISO()
   const horizon = new Date(Date.now() + HORIZON_DAYS * 86400_000).toISOString().slice(0, 10)
-
-  const service = tryServiceClient()
-  if (!service.ok) return NextResponse.json({ error: service.error }, { status: 500 })
-  const sb = service.sb
 
   // Service role, because cron has no session. Scoped tightly: open, not yet
   // notified, and actually due soon — never a blanket read of the table.
@@ -188,9 +198,31 @@ async function run(commitmentId?: string) {
     results.push(outcome)
   }
 
+  const notified = results.filter(r => r.slack === 'sent' || r.email === 'sent').length
+
+  /*
+   * The heartbeat. Written on every scheduled pass, including the quiet ones.
+   *
+   * Without it the log only records sends, so a cron that never fires looks
+   * exactly like a cron that fires and finds nothing due — and the difference is
+   * the whole notification system silently not running.
+   */
+  if (source === 'cron') {
+    const failures = results.filter(
+      r => (r.slack && r.slack !== 'sent') || (r.email && r.email !== 'sent'),
+    ).length
+    await logNotification(sb, {
+      channel: 'app',
+      event: 'run',
+      status: failures > 0 ? 'failed' : 'ok',
+      detail: `cron: considered ${rows.length}, notified ${notified}` +
+        (failures > 0 ? `, ${failures} with a problem` : ''),
+    })
+  }
+
   return NextResponse.json({
     considered: rows.length,
-    notified: results.filter(r => r.slack === 'sent' || r.email === 'sent').length,
+    notified,
     channels: { slack: slackOn, email: mailOn },
     results,
   })

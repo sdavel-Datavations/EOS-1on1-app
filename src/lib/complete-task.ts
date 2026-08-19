@@ -60,7 +60,7 @@ export async function logNotification(
     commitment_id?: string | null
     user_id?: string | null
     channel: 'slack' | 'email' | 'app'
-    event: 'notify' | 'complete' | 'error'
+    event: 'notify' | 'complete' | 'error' | 'run'
     status: 'sent' | 'failed' | 'skipped' | 'ok'
     detail?: string
   },
