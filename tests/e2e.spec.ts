@@ -1,5 +1,5 @@
 import { test, expect, Page } from '@playwright/test'
-import { seedAndLogin, createUser, invite, invitationsReady, login, baseUrl, tableExists, commitmentsTableExists, participantsTableExists, trackerReady, subtasksReady, backdateMeeting, metricsReady, loadEnv } from './playwright-auth'
+import { seedAndLogin, createUser, invite, invitationsReady, login, baseUrl, tableExists, commitmentsTableExists, participantsTableExists, trackerReady, subtasksReady, backdateMeeting, metricsReady, loadEnv, schedulesReady } from './playwright-auth'
 import { describeDue, todayISO } from '../src/lib/tracker'
 
 async function signInAndStartMeeting(page: Page, name = 'E2E User') {
@@ -1180,4 +1180,41 @@ test('a scheduled run leaves a heartbeat even when it cannot send', async ({ req
     `${url}/rest/v1/notification_log?event=eq.run&created_at=gte.${before}`,
     { headers: { apikey: key!, Authorization: `Bearer ${key}` } },
   )
+})
+
+test('a 1-on-1 can be scheduled, and a skipped week shows up', async ({ page }) => {
+  test.skip(!(await schedulesReady()), 'meeting_schedules missing — run supabase-schedules.sql')
+
+  const mateEmail = `sched+${Date.now()}@example.com`
+  await invite(mateEmail)
+  await createUser(mateEmail, 'Password123!', 'Ashley Rivera')
+
+  await seedAndLogin(page, `mgr+${Date.now()}@example.com`, 'Password123!', 'Sam Davel')
+  await page.goto('/team')
+  await expect(page.getByText('Ashley Rivera')).toBeVisible({ timeout: 15000 })
+
+  // Set a weekly Wednesday 1-on-1
+  await page.getByRole('button', { name: '+ Schedule' }).first().click()
+  await page.getByLabel(/1-on-1 day with/).selectOption({ label: 'Wednesday' })
+  await page.getByLabel(/1-on-1 cadence with/).selectOption({ label: 'Every week' })
+  await page.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(page.getByRole('button', { name: /Wed · wkly/ })).toBeVisible({ timeout: 15000 })
+
+  // The dashboard now knows when it is due. Nothing has been held, so the weeks
+  // that have already passed read as missed — which is the point: a week nobody
+  // held used to leave no trace at all.
+  await page.goto('/')
+  await expect(page.getByRole('heading', { name: 'Cadence' })).toBeVisible({ timeout: 15000 })
+  await expect(page.getByText(/Every week on Wednesday/)).toBeVisible()
+  await expect(page.getByText(/held 0 of/)).toBeVisible()
+  await expect(page.getByText(/Missed/).first()).toBeVisible()
+
+  // Removing it takes the panel away rather than leaving an empty section
+  await page.goto('/team')
+  await page.getByRole('button', { name: /Wed · wkly/ }).click()
+  await page.getByRole('button', { name: 'Remove' }).click()
+  await expect(page.getByRole('button', { name: '+ Schedule' }).first()).toBeVisible({ timeout: 15000 })
+  await page.goto('/')
+  await expect(page.getByRole('heading', { name: 'New Meeting' })).toBeVisible({ timeout: 15000 })
+  await expect(page.getByRole('heading', { name: 'Cadence' })).toHaveCount(0)
 })

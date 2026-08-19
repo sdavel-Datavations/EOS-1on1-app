@@ -1,8 +1,10 @@
 'use client'
 
+
 import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
-import { useAuth } from '@/lib/hooks'
+import { useAuth, useSchedules, upsertSchedule, deleteSchedule, describeScheduleError } from '@/lib/hooks'
+import { WEEKDAYS, CADENCE_LABEL, type Schedule, type Cadence } from '@/lib/schedule'
 import { createClient } from '@/lib/supabase'
 
 type Person = {
@@ -155,6 +157,9 @@ export default function TeamPage() {
   const possibleManagers = people.filter(p => p.access_level === 'manager' || p.access_level === 'admin')
   // Free text with suggestions, so a new department needs no migration.
   const departments = [...new Set(people.map(p => p.department).filter(Boolean) as string[])].sort()
+  const {
+    schedules, migrationNeeded: schedulesMissing, refetch: refetchSchedules,
+  } = useSchedules(user?.id)
 
   return (
     <div className="min-h-screen">
@@ -296,6 +301,16 @@ export default function TeamPage() {
                       </div>
                       <div className="text-xs text-gray">{p.email}</div>
                     </div>
+                    {p.id !== user.id && (
+                      <ScheduleControl
+                        managerId={user.id}
+                        reportId={p.id}
+                        name={p.full_name || p.email || 'them'}
+                        schedules={schedules}
+                        migrationNeeded={schedulesMissing}
+                        onSaved={refetchSchedules}
+                      />
+                    )}
                     {isAdmin ? (
                       <>
                         <select
@@ -341,6 +356,114 @@ export default function TeamPage() {
           </>
         )}
       </main>
+    </div>
+  )
+}
+
+/**
+ * Sets the recurring 1-on-1 with one person.
+ *
+ * Only offered from the manager side, because that is all the database allows:
+ * being someone's report does not come with the authority to reschedule your own
+ * review, the same reasoning as due dates belonging to whoever assigned the work.
+ */
+function ScheduleControl({ managerId, reportId, name, schedules, migrationNeeded, onSaved }: {
+  managerId: string
+  reportId: string
+  name: string
+  schedules: Schedule[]
+  migrationNeeded: boolean
+  onSaved: () => void
+}) {
+  const existing = schedules.find(s => s.manager_id === managerId && s.report_id === reportId)
+  const [open, setOpen] = useState(false)
+  const [cadence, setCadence] = useState<Cadence>(existing?.cadence ?? 'weekly')
+  const [weekday, setWeekday] = useState(existing?.weekday ?? 3)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  if (migrationNeeded) return null
+
+  const save = async () => {
+    setSaving(true)
+    setError(null)
+    const { error: failure } = await upsertSchedule({
+      id: existing?.id, manager_id: managerId, report_id: reportId, cadence, weekday, created_by: managerId,
+    })
+    if (failure) setError(describeScheduleError(failure))
+    else { setOpen(false); onSaved() }
+    setSaving(false)
+  }
+
+  const remove = async () => {
+    if (!existing) return
+    setSaving(true)
+    setError(null)
+    const { error: failure } = await deleteSchedule(existing.id)
+    if (failure) setError(describeScheduleError(failure))
+    else { setOpen(false); onSaved() }
+    setSaving(false)
+  }
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => {
+          setCadence(existing?.cadence ?? 'weekly')
+          setWeekday(existing?.weekday ?? 3)
+          setError(null)
+          setOpen(true)
+        }}
+        className="text-[11px] font-bold uppercase tracking-wide text-steel-blue hover:text-deep-purple transition"
+      >
+        {existing ? `${WEEKDAYS[existing.weekday].slice(0, 3)} · ${existing.cadence === 'weekly' ? 'wkly' : 'fortn'}` : '+ Schedule'}
+      </button>
+    )
+  }
+
+  return (
+    <div className="flex items-center gap-2 flex-wrap w-full">
+      <select
+        value={weekday}
+        onChange={e => setWeekday(Number(e.target.value))}
+        aria-label={`1-on-1 day with ${name}`}
+        className="border border-light-gray rounded px-2 py-1 text-xs focus:border-steel-blue focus:outline-none"
+      >
+        {WEEKDAYS.map((d, i) => <option key={d} value={i}>{d}</option>)}
+      </select>
+      <select
+        value={cadence}
+        onChange={e => setCadence(e.target.value as Cadence)}
+        aria-label={`1-on-1 cadence with ${name}`}
+        className="border border-light-gray rounded px-2 py-1 text-xs focus:border-steel-blue focus:outline-none"
+      >
+        {(['weekly', 'fortnightly'] as Cadence[]).map(c => (
+          <option key={c} value={c}>{CADENCE_LABEL[c]}</option>
+        ))}
+      </select>
+      <button
+        onClick={save}
+        disabled={saving}
+        className="bg-steel-blue text-white font-semibold px-2.5 py-1 rounded text-[11px] hover:bg-[#25698f] transition disabled:opacity-50"
+      >
+        {saving ? 'Saving...' : 'Save'}
+      </button>
+      {existing && (
+        <button
+          onClick={remove}
+          disabled={saving}
+          className="text-[11px] font-bold uppercase tracking-wide text-gray hover:text-coral-red transition"
+        >
+          Remove
+        </button>
+      )}
+      <button
+        onClick={() => setOpen(false)}
+        className="text-[11px] font-bold uppercase tracking-wide text-gray hover:text-steel-blue transition"
+      >
+        Cancel
+      </button>
+      {error && <p className="text-[11px] text-coral-red w-full">{error}</p>}
     </div>
   )
 }

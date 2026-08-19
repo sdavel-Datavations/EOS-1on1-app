@@ -1,7 +1,12 @@
 'use client'
 
-import { useAuth, useMeetings, createMeeting, deleteMeeting, describeMeetingError } from '@/lib/hooks'
+import { useAuth, useMeetings, createMeeting, deleteMeeting, describeMeetingError, useSchedules } from '@/lib/hooks'
 import { todayISO } from '@/lib/tracker'
+import { addDays } from '@/lib/metrics'
+import {
+  nextOccurrence, adherence, describeMissed, describeDate, CADENCE_LABEL, WEEKDAYS,
+  type ScheduledMeeting,
+} from '@/lib/schedule'
 import TaskSummary from '@/components/TaskSummary'
 import { getResolvedSupabaseUrl } from '@/lib/supabase'
 import { useState } from 'react'
@@ -160,6 +165,9 @@ export default function Home() {
       <main className="max-w-3xl mx-auto px-4 py-8">
         {/* The board itself lives at /tasks; this is just the way in. */}
         <TaskSummary userId={user.id} />
+
+        {/* When the next 1-on-1 is due, and which weeks got skipped */}
+        <CadencePanel userId={user.id} meetings={meetings} />
 
         {/* New Meeting */}
         <div className="bg-white rounded-xl border border-light-gray p-6 mb-8">
@@ -380,6 +388,82 @@ function SearchBar() {
           <button onClick={() => setResults(null)} className="text-xs text-gray hover:text-near-black">Clear results</button>
         </div>
       )}
+    </div>
+  )
+}
+
+/**
+ * The cadence: when each 1-on-1 is next due, and which weeks were skipped.
+ *
+ * Skipped weeks were previously invisible. A meeting only existed if somebody
+ * created one, so a week nobody held left no trace — the single most useful thing
+ * a weekly tool could tell you, and the one thing it could not.
+ *
+ * Nothing here creates a meeting. A row written by a scheduler would be
+ * indistinguishable from one that happened, which would erase the gaps.
+ */
+function CadencePanel({ userId, meetings }: { userId: string; meetings: Meeting[] }) {
+  const { schedules, loading, migrationNeeded } = useSchedules(userId)
+  const today = todayISO()
+
+  if (loading || migrationNeeded || schedules.length === 0) return null
+
+  const scheduled: ScheduledMeeting[] = meetings.map(m => ({
+    meeting_date: m.meeting_date,
+    manager_id: m.manager_id,
+    report_id: m.report_id,
+  }))
+  // Eight weeks back: long enough to show a pattern, short enough that a gap from
+  // months ago is not still being reported as news.
+  const from = addDays(today, -56)
+
+  const rows = schedules
+    .filter(s => s.active)
+    .map(s => {
+      const other = s.manager_id === userId ? s.report_id : s.manager_id
+      const person = meetings.find(m => m.manager_id === other)?.manager
+        || meetings.find(m => m.report_id === other)?.report
+      return {
+        schedule: s,
+        name: person?.full_name || person?.email || 'your 1-on-1',
+        next: nextOccurrence(s, today),
+        record: adherence(s, scheduled, from, today, today),
+      }
+    })
+
+  if (rows.length === 0) return null
+
+  return (
+    <div className="bg-white rounded-xl border border-light-gray p-6 mb-8">
+      <h2 className="text-lg font-bold text-deep-purple mb-1">Cadence</h2>
+      <div className="w-14 h-[3px] bg-steel-blue rounded mb-4" />
+      <div className="space-y-3">
+        {rows.map(({ schedule, name, next, record }) => {
+          const missedNote = describeMissed(record.missed)
+          const dueToday = next === today
+          return (
+            <div key={schedule.id} className={`p-3 rounded-lg border ${
+              record.missed.length > 1 ? 'border-coral-red bg-red-light' : 'border-light-gray'
+            }`}>
+              <div className="flex items-baseline justify-between gap-2 flex-wrap">
+                <span className="font-semibold text-sm text-near-black">{name}</span>
+                <span className={`text-xs ${dueToday ? 'text-steel-blue font-bold' : 'text-gray'}`}>
+                  {next ? (dueToday ? 'Due today' : `Next ${describeDate(next)}`) : 'Paused'}
+                </span>
+              </div>
+              <div className="text-xs text-gray mt-1">
+                {CADENCE_LABEL[schedule.cadence]} on {WEEKDAYS[schedule.weekday]} ·{' '}
+                held {record.held.length} of {record.held.length + record.missed.length} in the last 8 weeks
+              </div>
+              {missedNote && (
+                <div className={`text-xs mt-1 font-semibold ${record.missed.length > 1 ? 'text-coral-red' : 'text-[#e67e22]'}`}>
+                  {missedNote}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }

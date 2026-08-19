@@ -5,6 +5,7 @@ import { parseActionItems, resolveOwner } from './parse-action-items'
 import { partitionOpenWork, EMPTY_OPEN_WORK, type OpenWork } from './open-work'
 import { summarizeNotify, type NotifySummary } from './notify-outcome'
 import type { MetricTask, MetricEvent } from './metrics'
+import type { Schedule, Cadence } from './schedule'
 import type { Rock, RockCheckin, RockStatus, Meeting, SegueNote, ScorecardItem, Headline, Issue, Todo, SectionTimer, Profile, Commitment, TrackedCommitment, Teammate, MeetingParticipant, ParticipantRole, ExtractedItem } from './types'
 
 function getSupabase() {
@@ -710,6 +711,106 @@ export function useOpenWork(meetingId: string, ownerIds: string[]) {
  * tomorrow — and the Slack message is also what makes "reply done" possible at
  * all, since a threaded reply is matched back to the task by its message id.
  */
+
+
+// ── 1-on-1 schedules ──
+
+/**
+ * The recurring 1-on-1s the caller can see.
+ *
+ * Nothing here creates meetings. The schedule says when a 1-on-1 was expected; a
+ * real meeting row says one happened, and the gap between the two is the whole
+ * point — a scheduler that filled the gap in would erase it.
+ */
+export function useSchedules(userId: string | undefined) {
+  const [schedules, setSchedules] = useState<Schedule[]>([])
+  const [loading, setLoading] = useState(true)
+  const [migrationNeeded, setMigrationNeeded] = useState(false)
+
+  const fetchSchedules = useCallback(async () => {
+    if (!userId) return
+    const { data, error } = await getSupabase()
+      .from('meeting_schedules')
+      .select('id, manager_id, report_id, cadence, weekday, active')
+      .order('weekday')
+
+    if (error) {
+      // PGRST205: the table is not in the schema cache, which is a pending
+      // migration rather than a fault. Everything else on the page still works.
+      setMigrationNeeded(error.code === 'PGRST205' || /meeting_schedules/i.test(error.message))
+      setSchedules([])
+    } else {
+      setMigrationNeeded(false)
+      setSchedules((data as unknown as Schedule[]) || [])
+    }
+    setLoading(false)
+  }, [userId])
+
+  useEffect(() => { fetchSchedules() }, [fetchSchedules])
+
+  return { schedules, loading, migrationNeeded, refetch: fetchSchedules }
+}
+
+export function describeScheduleError(error: { code?: string; message: string }) {
+  if (error.code === 'PGRST205' || /meeting_schedules/i.test(error.message)) {
+    return 'Schedules need supabase-schedules.sql — run it in the Supabase SQL editor.'
+  }
+  if (error.code === '23505') {
+    return 'There is already a schedule for those two people.'
+  }
+  if (error.code === '42501') {
+    return 'Only the manager side of a 1-on-1 can schedule it.'
+  }
+  return error.message
+}
+
+export async function upsertSchedule(item: {
+  id?: string
+  manager_id: string
+  report_id: string
+  cadence: Cadence
+  weekday: number
+  active?: boolean
+  created_by?: string
+}) {
+  const sb = getSupabase()
+  if (item.id) {
+    // .select() so an RLS refusal surfaces instead of looking like a save.
+    const { data, error } = await sb
+      .from('meeting_schedules')
+      .update({ cadence: item.cadence, weekday: item.weekday, active: item.active ?? true })
+      .eq('id', item.id)
+      .select('id')
+    if (error) return { error }
+    if (!data || data.length === 0) {
+      return { error: { message: 'That schedule was not changed. Only the manager side can.' } }
+    }
+    return { error: null }
+  }
+
+  const { error } = await sb.from('meeting_schedules').insert({
+    manager_id: item.manager_id,
+    report_id: item.report_id,
+    cadence: item.cadence,
+    weekday: item.weekday,
+    active: item.active ?? true,
+    created_by: item.created_by ?? item.manager_id,
+  })
+  return { error }
+}
+
+export async function deleteSchedule(id: string) {
+  const { data, error } = await getSupabase()
+    .from('meeting_schedules')
+    .delete()
+    .eq('id', id)
+    .select('id')
+  if (error) return { error }
+  if (!data || data.length === 0) {
+    return { error: { message: 'That schedule was not removed. Only the manager side can.' } }
+  }
+  return { error: null }
+}
 
 export interface MetricsData {
   /** Everyone whose numbers the caller is entitled to see. */

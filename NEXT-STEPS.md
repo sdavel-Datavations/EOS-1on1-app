@@ -147,6 +147,28 @@ There is no Anthropic key and no LLM dependency.
 - No AI/LLM dependency. "Import Next Steps" parses the action-item list Granola or Gemini
   already produced — `src/lib/parse-action-items.ts`.
 
+## Cadence and skipped weeks (`meeting_schedules`)
+
+- A schedule says when a 1-on-1 was **expected**; a real meeting row says one **happened**. The
+  gap between the two is the entire feature.
+- **Nothing auto-creates meetings, deliberately.** A row written by a scheduler would be
+  indistinguishable from one somebody held, so the schedule would erase the very gaps it
+  exists to reveal.
+- **Held is matched by week, not by exact date.** A Wednesday slot moved to Thursday is the same
+  1-on-1; marking it missed would make the figure measure punctuality rather than whether
+  people are actually meeting.
+- **Today is never missed yet** — the 1-on-1 may still be this afternoon, and flagging it at
+  breakfast would make the current week always look bad.
+- Only the **manager side** (or an admin, or someone above them) can create or change a
+  schedule. Being someone's report does not come with the authority to reschedule your own
+  review — the same reasoning as due dates belonging to whoever assigned the work.
+- `weekday` is 0-6 with **0 = Sunday**, matching `getUTCDay()`, so the app needs no conversion.
+- Set it on `/team`; it shows on the dashboard as a **Cadence** panel.
+- **Calendar (Google) sync was deliberately not built.** It needs OAuth refresh tokens with
+  calendar scope stored server-side, and it still would not say whether the 1-on-1 *happened* —
+  only that it was on a calendar. In-app scheduling answers both questions with no credentials.
+  Worth adding on top later, not instead.
+
 ## Is the notification system actually running?
 
 - The nightly cron writes a **heartbeat** to `notification_log` on every scheduled pass —
@@ -194,6 +216,6 @@ There is no Anthropic key and no LLM dependency.
 
 `supabase-schema.sql` → `commitments` → `participants` → `transcripts` → `delete-meetings` →
 `weekly-tracker` → `notifications` → `access-control` → `departments` → `subtasks` → `rocks`
-→ `metrics`
+→ `metrics` → `schedules`
 
 Run in that order; each depends on the ones before it. All are applied in production.

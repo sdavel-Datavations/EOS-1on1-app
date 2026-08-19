@@ -203,3 +203,8 @@ export async function metricsReady() {
   if (res.ok) return true
   return !(await res.text()).includes('PGRST202')
 }
+
+/** True once supabase-schedules.sql has been applied. */
+export async function schedulesReady() {
+  return tableExists('meeting_schedules')
+}
