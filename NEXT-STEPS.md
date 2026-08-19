@@ -54,6 +54,20 @@ There is no Anthropic key and no LLM dependency.
    without having been copied.
 5. Verify the email path per (3) above.
 
+## Testing traps worth remembering
+
+- **`.first()` on a board with more than one task attaches work to the wrong parent**, and
+  every assertion still passes because the subtask does exist — just not where the test meant.
+  Scope to `data-testid="task-group"` or `data-testid="task-row"` and filter by title.
+- **Success notices quote the task title back**, so `getByText('<title>')` matches the notice
+  rather than the row. Assert on rows (`getByTestId('task-row').filter({ hasText })`) when
+  checking whether something is gone.
+- **Killing a run skips `globalTeardown`**, leaving `@example.com` accounts in the live
+  database. Run the teardown by hand afterwards:
+  `npx tsx -e "import t from './tests/global-teardown'; (t as any)()"`.
+- The suite occasionally fails a batch on Supabase slowness — logins time out and `Sign out`
+  never appears. Re-run the failures before believing them.
+
 ## Conventions to keep
 
 - **Probe the live database before trusting a schema file.** `profiles.role` already existed
@@ -93,6 +107,16 @@ There is no Anthropic key and no LLM dependency.
 - Rocks live in `rocks`, keyed by (owner_id, quarter), and are **read** by every agenda in
   that quarter rather than copied into it. `rock_checkins` holds the weekly pulse, unique per
   (rock, meeting).
+- **Notes and context** live in the existing `weekly_commitments.description` column, so no
+  migration was needed. Set them when creating a task, or add and edit them in place on any
+  row. They travel with the task into the Slack DM and the email — context that stays in the
+  app is context the assignee never sees.
+- **Deleting a task** is allowed by the existing `FOR ALL` policy: the assignee, the creator,
+  or anyone in the task's 1-on-1. Departmental and oversight viewers stay read-only, which is
+  the point of those being separate `FOR SELECT` policies. `parent_id` is `ON DELETE CASCADE`,
+  so deleting a main task removes its subtasks — the confirmation says how many, because that
+  is not recoverable. `deleteCommitment` selects the row back, since an RLS-refused delete
+  removes no rows and reports no error, which is otherwise indistinguishable from success.
 - Subtasks are one level deep, enforced by a trigger, and **assignable to anyone in the owner
   dropdown** (people you share a meeting with). A piece kept for whoever owns the main task is
   silent; a piece handed to someone else is notified, so one handover is one DM rather than

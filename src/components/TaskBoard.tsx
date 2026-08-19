@@ -6,6 +6,8 @@ import {
   useMyCommitments,
   useTeammates,
   createStandaloneCommitment,
+  updateCommitment,
+  deleteCommitment,
   findProfileByEmail,
   setCommitmentStatus,
   notifyCommitment,
@@ -45,6 +47,7 @@ export default function TaskBoard({
 
   const [title, setTitle] = useState('')
   const [dueDate, setDueDate] = useState('')
+  const [notes, setNotes] = useState('')
   const [assigneeId, setAssigneeId] = useState(userId)
   const [assigneeEmail, setAssigneeEmail] = useState('')
   const [notifySlack, setNotifySlack] = useState(true)
@@ -60,6 +63,7 @@ export default function TaskBoard({
   const [subtaskTitle, setSubtaskTitle] = useState('')
   const [subtaskAssignee, setSubtaskAssignee] = useState(userId)
   const [openDone, setOpenDone] = useState<Set<DoneBucket>>(new Set(['week']))
+  const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null)
 
   const today = todayISO()
 
@@ -130,6 +134,7 @@ export default function TaskBoard({
       creator_id: userId,
       assignee_id: targetId,
       title: title.trim(),
+      description: notes,
       due_date: dueDate || null,
       notify_slack: notifySlack,
       notify_email: notifyEmail,
@@ -146,6 +151,7 @@ export default function TaskBoard({
 
     setTitle('')
     setDueDate('')
+    setNotes('')
     setAssigneeEmail('')
     await refetch()
 
@@ -222,6 +228,26 @@ export default function TaskBoard({
           : `Subtask added. ${notifyNotice(summary, who)}`,
       )
     }
+    setBusyId(null)
+  }
+
+  const remove = async (c: TrackedCommitment) => {
+    setBusyId(c.id)
+    setSaveError(null)
+    setNotice(null)
+    const { error: failure } = await deleteCommitment(c.id)
+    if (failure) {
+      setSaveError(describeCommitmentError(failure))
+    } else {
+      const kids = subtasksOf.get(c.id)?.length || 0
+      setNotice(
+        kids > 0
+          ? `Deleted "${c.title}" and its ${kids} subtask${kids === 1 ? '' : 's'}.`
+          : `Deleted "${c.title}".`,
+      )
+    }
+    setConfirmingDelete(null)
+    await refetch()
     setBusyId(null)
   }
 
@@ -337,6 +363,14 @@ export default function TaskBoard({
           </button>
         </div>
 
+        <textarea
+          value={notes}
+          onChange={e => setNotes(e.target.value)}
+          rows={notes ? 3 : 1}
+          placeholder="Notes and context — background, links, what &ldquo;done&rdquo; looks like (optional)"
+          className="mt-2 w-full border border-light-gray rounded-lg px-3 py-2 text-sm focus:border-steel-blue focus:outline-none resize-y"
+        />
+
         <div className="flex items-center gap-4 mt-3">
           <label className="flex items-center gap-1.5 text-xs text-gray cursor-pointer">
             <input type="checkbox" checked={notifySlack} onChange={e => setNotifySlack(e.target.checked)} />
@@ -410,6 +444,11 @@ export default function TaskBoard({
                     onExpand={() => toggleExpanded(c.id)}
                     onToggle={toggle}
                     onResend={resend}
+                    onSaved={refetch}
+                    onDelete={remove}
+                    confirmingDelete={confirmingDelete}
+                    onConfirmDelete={setConfirmingDelete}
+                    subtaskCount={subtasksOf.get(c.id)?.length || 0}
                     subtaskOpen={subtaskFor === c.id}
                     onSubtaskOpen={() => {
                       setSubtaskFor(subtaskFor === c.id ? null : c.id)
@@ -457,6 +496,11 @@ export default function TaskBoard({
                       onExpand={() => toggleExpanded(c.id)}
                       onToggle={toggle}
                       onResend={resend}
+                      onSaved={refetch}
+                      onDelete={remove}
+                      confirmingDelete={confirmingDelete}
+                      onConfirmDelete={setConfirmingDelete}
+                      subtaskCount={subtasksOf.get(c.id)?.length || 0}
                       subtaskOpen={subtaskFor === c.id}
                       onSubtaskOpen={() => {
                         setSubtaskFor(subtaskFor === c.id ? null : c.id)
@@ -483,8 +527,113 @@ export default function TaskBoard({
   )
 }
 
+
+/**
+ * Notes and context on a task, editable in place.
+ *
+ * Collapsed by default: on a board of twenty tasks, twenty paragraphs of context
+ * stops being a list. The notes travel with the task into Slack and email, so
+ * they are usually read by whoever was handed it rather than whoever wrote it.
+ */
+function TaskNotes({ c, canEdit, onSaved }: {
+  c: TrackedCommitment
+  canEdit: boolean
+  onSaved: () => void
+}) {
+  const existing = (c.description || '').trim()
+  const [open, setOpen] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(existing)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const save = async () => {
+    setSaving(true)
+    setError(null)
+    // updateCommitment selects the row back, so an RLS refusal surfaces here
+    // rather than looking like a save that worked.
+    const { error: failure } = await updateCommitment(c.id, { description: draft.trim() })
+    if (failure) {
+      setError(describeCommitmentError(failure))
+      setSaving(false)
+      return
+    }
+    setEditing(false)
+    setOpen(true)
+    setSaving(false)
+    onSaved()
+  }
+
+  if (editing) {
+    return (
+      <div className="mt-2">
+        <textarea
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          rows={3}
+          autoFocus
+          placeholder="Background, links, what done looks like..."
+          className="w-full border border-light-gray rounded-lg px-2 py-1.5 text-xs focus:border-steel-blue focus:outline-none resize-y"
+        />
+        <div className="flex gap-2 mt-1">
+          <button
+            onClick={save}
+            disabled={saving}
+            className="bg-steel-blue text-white font-semibold px-2.5 py-1 rounded text-[11px] hover:bg-[#25698f] transition disabled:opacity-50"
+          >
+            {saving ? 'Saving...' : 'Save'}
+          </button>
+          <button
+            onClick={() => { setEditing(false); setDraft(existing); setError(null) }}
+            className="text-[11px] font-bold uppercase tracking-wide text-gray hover:text-steel-blue transition"
+          >
+            Cancel
+          </button>
+        </div>
+        {error && <p className="text-[11px] text-coral-red mt-1">{error}</p>}
+      </div>
+    )
+  }
+
+  if (!existing) {
+    return canEdit ? (
+      <button
+        onClick={() => { setDraft(''); setEditing(true) }}
+        className="text-[11px] font-bold uppercase tracking-wide text-gray hover:text-steel-blue transition mt-0.5"
+      >
+        + Notes
+      </button>
+    ) : null
+  }
+
+  return (
+    <div className="mt-1">
+      <button
+        onClick={() => setOpen(!open)}
+        className="text-[11px] font-bold uppercase tracking-wide text-steel-blue hover:text-deep-purple transition"
+      >
+        {open ? '▾' : '▸'} Notes
+      </button>
+      {open && (
+        <div className="mt-1 text-xs text-near-black whitespace-pre-wrap border-l-2 border-light-gray pl-2">
+          {existing}
+          {canEdit && (
+            <button
+              onClick={() => { setDraft(existing); setEditing(true) }}
+              className="block mt-1 text-[11px] font-bold uppercase tracking-wide text-gray hover:text-steel-blue transition"
+            >
+              Edit
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function Row({
-  c, today, nameFor, busy, notificationsReady, userId, onToggle, onResend, flat, orphaned,
+  c, today, nameFor, busy, notificationsReady, userId, onToggle, onResend, onSaved,
+  onDelete, confirmingDelete, onConfirmDelete, deleteAlsoRemoves = 0, flat, orphaned,
 }: {
   c: TrackedCommitment
   today: string
@@ -494,6 +643,12 @@ function Row({
   userId: string
   onToggle: () => void
   onResend: () => void
+  onSaved: () => void
+  onDelete: () => void
+  confirmingDelete: boolean
+  onConfirmDelete: () => void
+  /** Subtasks that would go with it, since parent_id cascades in the database. */
+  deleteAlsoRemoves?: number
   /** True when TaskGroup already draws the surrounding card. */
   flat?: boolean
   /**
@@ -519,6 +674,7 @@ function Row({
 
   return (
     <div
+      data-testid="task-row"
       className={
         flat
           ? `${base} ${overdue ? 'border-l-4 border-coral-red bg-red-light rounded-r-lg' : ''}`
@@ -590,6 +746,7 @@ function Row({
             </span>
           )}
         </div>
+        <TaskNotes c={c} canEdit={canEdit} onSaved={onSaved} />
       </div>
 
       {!isDone && notificationsReady && (
@@ -614,6 +771,44 @@ function Row({
           )}
         </div>
       )}
+
+      {/* Deleting is offered on done tasks too: a finished task is exactly the
+          kind you want off the board. Only for people the database will actually
+          let through — departmental and oversight viewers are read-only. */}
+      {canEdit && (
+        <div className="flex-shrink-0">
+          {confirmingDelete ? (
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] text-gray whitespace-nowrap">
+                {deleteAlsoRemoves > 0
+                  ? `Delete this and its ${deleteAlsoRemoves} subtask${deleteAlsoRemoves === 1 ? '' : 's'}?`
+                  : 'Delete?'}
+              </span>
+              <button
+                onClick={onDelete}
+                disabled={busy}
+                className="bg-coral-red text-white text-[10px] font-semibold px-2 py-1 rounded disabled:opacity-50"
+              >
+                {busy ? 'Deleting...' : 'Delete'}
+              </button>
+              <button
+                onClick={onConfirmDelete}
+                className="border border-light-gray text-gray text-[10px] font-semibold px-2 py-1 rounded"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={onConfirmDelete}
+              title="Delete this task"
+              className="text-[10px] font-bold uppercase tracking-wide text-gray hover:text-coral-red transition"
+            >
+              Delete
+            </button>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -626,7 +821,8 @@ function Row({
  */
 function TaskGroup({
   c, userId, subtasks, today, nameFor, busyId, notificationsReady, expanded, onExpand,
-  onToggle, onResend, subtaskOpen, onSubtaskOpen, subtaskTitle, onSubtaskTitle,
+  onToggle, onResend, onSaved, onDelete, confirmingDelete, onConfirmDelete, subtaskCount,
+  subtaskOpen, onSubtaskOpen, subtaskTitle, onSubtaskTitle,
   subtaskAssignee, onSubtaskAssignee, ownerOptions, onSubtaskAdd, orphaned,
 }: {
   c: TrackedCommitment
@@ -640,6 +836,11 @@ function TaskGroup({
   onExpand: () => void
   onToggle: (c: TrackedCommitment) => void
   onResend: (c: TrackedCommitment) => void
+  onSaved: () => void
+  onDelete: (c: TrackedCommitment) => void
+  confirmingDelete: string | null
+  onConfirmDelete: (id: string | null) => void
+  subtaskCount: number
   subtaskOpen: boolean
   onSubtaskOpen: () => void
   subtaskTitle: string
@@ -662,6 +863,7 @@ function TaskGroup({
 
   return (
     <div
+      data-testid="task-group"
       className={
         total > 0
           ? `border rounded-lg ${overdue > 0 ? 'border-coral-red bg-red-light' : 'border-light-gray bg-white'}`
@@ -677,6 +879,11 @@ function TaskGroup({
         userId={userId}
         onToggle={() => onToggle(c)}
         onResend={() => onResend(c)}
+        onSaved={onSaved}
+        onDelete={() => onDelete(c)}
+        confirmingDelete={confirmingDelete === c.id}
+        onConfirmDelete={() => onConfirmDelete(confirmingDelete === c.id ? null : c.id)}
+        deleteAlsoRemoves={subtaskCount}
         flat={total > 0}
         orphaned={orphaned}
       />
@@ -754,6 +961,11 @@ function TaskGroup({
               userId={userId}
               onToggle={() => onToggle(sub)}
               onResend={() => onResend(sub)}
+              onSaved={onSaved}
+              onDelete={() => onDelete(sub)}
+              confirmingDelete={confirmingDelete === sub.id}
+              onConfirmDelete={() => onConfirmDelete(confirmingDelete === sub.id ? null : sub.id)}
+              deleteAlsoRemoves={0}
             />
           ))}
         </div>

@@ -114,7 +114,9 @@ export function taskBlocks(args: {
   askedBy: string
   meetingDate: string | null
   commitmentId: string
+  notes?: string | null
 }): unknown[] {
+  const notes = clip((args.notes || '').trim(), 700)
   const context = args.meetingDate
     ? `${args.askedBy} · from your 1-on-1 on ${args.meetingDate}`
     : `${args.askedBy} · added during the week`
@@ -124,6 +126,11 @@ export function taskBlocks(args: {
       type: 'section',
       text: { type: 'mrkdwn', text: `*${escapeMrkdwn(args.title)}*\n${args.dueLabel}` },
     },
+    // The context someone was given the task with. Without it the DM is a title
+    // and a date, and the assignee has to come and ask what was actually meant.
+    ...(notes
+      ? [{ type: 'section', text: { type: 'mrkdwn', text: escapeMrkdwn(notes) } }]
+      : []),
     {
       type: 'context',
       elements: [{ type: 'mrkdwn', text: context }],
@@ -145,6 +152,19 @@ export function taskBlocks(args: {
       elements: [{ type: 'mrkdwn', text: '_Or just reply “done” in this thread._' }],
     },
   ]
+}
+
+/**
+ * Trims to a length that still reads as a message rather than a document.
+ * Slack accepts 3000 characters in a section, but a DM that long gets skimmed and
+ * the Mark done button scrolls off. The full text stays in the app.
+ */
+export function clip(text: string, max: number): string {
+  if (text.length <= max) return text
+  // Break on a word so the cut does not land mid-word.
+  const cut = text.slice(0, max)
+  const space = cut.lastIndexOf(' ')
+  return `${(space > max * 0.6 ? cut.slice(0, space) : cut).trimEnd()}…`
 }
 
 /** Slack mrkdwn treats these as formatting; a task title is literal text. */

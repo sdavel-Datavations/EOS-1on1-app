@@ -24,6 +24,7 @@ const HORIZON_DAYS = 7
 type Row = {
   id: string
   title: string
+  description: string | null
   due_date: string | null
   assignee_id: string | null
   creator_id: string | null
@@ -117,7 +118,7 @@ async function run(commitmentId?: string) {
   // Service role, because cron has no session. Scoped tightly: open, not yet
   // notified, and actually due soon — never a blanket read of the table.
   const COLUMNS =
-    'id, title, due_date, assignee_id, creator_id, meeting_id, notify_slack, notify_email,' +
+    'id, title, description, due_date, assignee_id, creator_id, meeting_id, notify_slack, notify_email,' +
     ' meeting:meetings(meeting_date),' +
     ' assignee:profiles!weekly_commitments_assignee_id_fkey(id, full_name, email, slack_user_id),' +
     ' creator:profiles!weekly_commitments_creator_id_fkey(full_name)'
@@ -229,7 +230,10 @@ async function sendSlack(
   const { data, error } = await postMessage({
     channel: slackUserId,
     text: `Hi ${firstName(assignee.full_name)} — ${escapeMrkdwn(row.title)} (${dueLabel})`,
-    blocks: taskBlocks({ title: row.title, dueLabel, askedBy, meetingDate, commitmentId: row.id }),
+    blocks: taskBlocks({
+      title: row.title, dueLabel, askedBy, meetingDate, commitmentId: row.id,
+      notes: row.description,
+    }),
   })
 
   if (error || !data) {
@@ -278,6 +282,7 @@ async function sendEmail(
     askedBy,
     meetingDate,
     completeUrl,
+    notes: row.description,
   })
 
   const { error } = await sendMail({ to: assignee.email, subject, html, text })

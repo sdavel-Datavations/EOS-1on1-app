@@ -101,7 +101,9 @@ export function taskEmail(args: {
   askedBy: string
   meetingDate: string | null
   completeUrl: string
+  notes?: string | null
 }): { subject: string; html: string; text: string } {
+  const notes = (args.notes || '').trim()
   const context = args.meetingDate
     ? `${args.askedBy} raised this in your 1-on-1 on ${args.meetingDate}.`
     : `${args.askedBy} added this during the week.`
@@ -113,6 +115,7 @@ export function taskEmail(args: {
     '',
     args.title,
     args.dueLabel,
+    ...(notes ? ['', notes] : []),
     '',
     context,
     '',
@@ -124,6 +127,7 @@ export function taskEmail(args: {
   <p>Hi ${escapeHtml(args.firstName)},</p>
   <p style="font-size:17px;font-weight:600;margin:0 0 4px">${escapeHtml(args.title)}</p>
   <p style="margin:0 0 16px;color:#666;font-size:14px">${escapeHtml(args.dueLabel)}</p>
+  ${notes ? `<div style="white-space:pre-wrap;border-left:3px solid #e5e5e5;padding-left:12px;margin:0 0 16px;font-size:14px;line-height:1.5">${escapeHtml(notes)}</div>` : ''}
   <p style="color:#666;font-size:14px">${escapeHtml(context)}</p>
   <p style="margin:24px 0">
     <a href="${escapeHtml(args.completeUrl)}"

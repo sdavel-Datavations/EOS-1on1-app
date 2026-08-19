@@ -462,6 +462,8 @@ export async function createStandaloneCommitment(item: {
   creator_id: string
   assignee_id: string
   title: string
+  /** Free-text notes and context, shown on the task and sent with it. */
+  description?: string
   due_date?: string | null
   notify_email?: boolean
   notify_slack?: boolean
@@ -474,7 +476,7 @@ export async function createStandaloneCommitment(item: {
     creator_id: item.creator_id,
     assignee_id: item.assignee_id,
     title: item.title,
-    description: '',
+    description: item.description?.trim() || '',
     due_date: item.due_date || null,
     notify_email: item.notify_email ?? true,
     notify_slack: item.notify_slack ?? true,
@@ -767,6 +769,38 @@ export function useTeammates(userId: string | undefined) {
   }, [userId])
 
   return teammates
+}
+
+/**
+ * Deletes a task.
+ *
+ * Subtasks go with it: parent_id is ON DELETE CASCADE, so the database removes
+ * them without being asked. Callers have to say so before confirming — deleting
+ * five pieces of work when you meant one is not recoverable here.
+ *
+ * .select() so an RLS refusal is visible. A blocked delete affects no rows and
+ * reports no error, which is indistinguishable from success otherwise: only the
+ * assignee, the creator, or someone in the task's meeting may delete it, and
+ * departmental or oversight viewers explicitly may not.
+ */
+export async function deleteCommitment(id: string) {
+  const { data, error } = await getSupabase()
+    .from('weekly_commitments')
+    .delete()
+    .eq('id', id)
+    .select('id')
+
+  if (error) return { error }
+  if (!data || data.length === 0) {
+    return {
+      error: {
+        message:
+          'That task was not deleted. You can see it, but only the person it is for, ' +
+          'the person who created it, or someone in its 1-on-1 can remove it.',
+      },
+    }
+  }
+  return { error: null }
 }
 
 export async function updateCommitment(id: string, fields: Partial<Commitment>) {

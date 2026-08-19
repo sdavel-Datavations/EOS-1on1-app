@@ -730,3 +730,127 @@ test('a subtask can be handed to a teammate, and reaches them', async ({ page, b
   await expect(page.getByRole('button', { name: /1 of 2 done/ })).toBeVisible({ timeout: 20000 })
   await expect(page.getByText('Build HIRI Pulse Member edition')).toBeVisible()
 })
+
+test('a task carries notes, and they can be added or changed afterwards', async ({ page }) => {
+  test.skip(
+    !(await trackerReady()),
+    'completed_at column missing — run supabase-weekly-tracker.sql in the Supabase SQL editor',
+  )
+
+  await seedAndLogin(page, `notes+${Date.now()}@example.com`, 'Password123!', 'Notes Tester')
+  await page.goto('/tasks')
+
+  const notesBox = page.getByPlaceholder(/Notes and context/)
+  await page.getByPlaceholder('What needs doing?').fill('Build HIRI Pulse Member edition')
+  await notesBox.fill('Start from the pricing doc in Drive.\nMember tiers are still open.')
+  await page.getByRole('button', { name: /Add & Notify/ }).click()
+  await expect(page.getByText('Build HIRI Pulse Member edition')).toBeVisible({ timeout: 20000 })
+
+  // Collapsed by default — twenty tasks with twenty paragraphs is not a list
+  await expect(page.getByText('Start from the pricing doc in Drive.')).toHaveCount(0)
+  await page.getByRole('button', { name: /Notes/ }).first().click()
+  await expect(page.getByText('Start from the pricing doc in Drive.')).toBeVisible()
+  // Newlines survive rather than collapsing into one run-on line
+  await expect(page.getByText('Member tiers are still open.')).toBeVisible()
+
+  // The form is cleared, so the next task does not silently inherit this context
+  await expect(notesBox).toHaveValue('')
+
+  // It persisted rather than only rendering
+  await page.reload()
+  await page.getByRole('button', { name: /Notes/ }).first().click()
+  await expect(page.getByText('Start from the pricing doc in Drive.')).toBeVisible({ timeout: 15000 })
+
+  // Editing in place
+  await page.getByRole('button', { name: 'Edit' }).first().click()
+  const editor = page.getByPlaceholder(/Background, links, what done looks like/)
+  await editor.fill('Pricing is settled — build against the final tiers.')
+  await page.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(page.getByText('Pricing is settled — build against the final tiers.')).toBeVisible({ timeout: 15000 })
+  await expect(page.getByText('Start from the pricing doc in Drive.')).toHaveCount(0)
+
+  // A task created without notes can have them added later
+  await page.getByPlaceholder('What needs doing?').fill('Draft the September newsletter')
+  await page.getByRole('button', { name: /Add & Notify/ }).click()
+  await expect(page.getByText('Draft the September newsletter')).toBeVisible({ timeout: 20000 })
+  await page.getByRole('button', { name: '+ Notes' }).first().click()
+  await page.getByPlaceholder(/Background, links, what done looks like/).fill('Theme is retention.')
+  await page.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(page.getByText('Theme is retention.')).toBeVisible({ timeout: 15000 })
+
+  await page.reload()
+  await expect(page.getByRole('button', { name: '+ Notes' })).toHaveCount(0, { timeout: 15000 })
+})
+
+test('a task can be deleted, and a main task takes its subtasks with it', async ({ page }) => {
+  test.skip(
+    !(await subtasksReady()),
+    'parent_id column missing — run supabase-subtasks.sql in the Supabase SQL editor',
+  )
+
+  await seedAndLogin(page, `del+${Date.now()}@example.com`, 'Password123!', 'Delete Tester')
+  await page.goto('/tasks')
+
+  const rowFor = (title: string) => page.getByTestId('task-row').filter({ hasText: title })
+
+  // Cancelling must leave it alone — destructive, so it asks first
+  await page.getByPlaceholder('What needs doing?').fill('Keep this one')
+  await page.getByRole('button', { name: /Add & Notify/ }).click()
+  await expect(page.getByText('Keep this one')).toBeVisible({ timeout: 20000 })
+  const keep = rowFor('Keep this one')
+  await keep.getByRole('button', { name: 'Delete', exact: true }).click()
+  await expect(keep.getByText('Delete?')).toBeVisible()
+  await keep.getByRole('button', { name: 'Cancel' }).click()
+  await expect(keep.getByText('Delete?')).toHaveCount(0)
+  await expect(page.getByText('Keep this one')).toBeVisible()
+
+  // A plain task goes, and stays gone rather than only disappearing from view
+  await page.getByPlaceholder('What needs doing?').fill('Delete this one')
+  await page.getByRole('button', { name: /Add & Notify/ }).click()
+  await expect(page.getByText('Delete this one')).toBeVisible({ timeout: 20000 })
+
+  const doomed = rowFor('Delete this one')
+  // Exactly one exact-'Delete' button per row either way: the trigger is replaced
+  // by the confirmation, so the same locator serves for both clicks.
+  await doomed.getByRole('button', { name: 'Delete', exact: true }).click()
+  await expect(doomed.getByText('Delete?')).toBeVisible()
+  await doomed.getByRole('button', { name: 'Delete', exact: true }).click()
+  // Asserted on rows, not page text: the confirmation notice quotes the title
+  // back ("Deleted \"Delete this one\"."), so getByText still finds it.
+  await expect(rowFor('Delete this one')).toHaveCount(0, { timeout: 15000 })
+  await page.reload()
+  await expect(rowFor('Delete this one')).toHaveCount(0, { timeout: 15000 })
+  await expect(rowFor('Keep this one')).toHaveCount(1)
+
+  // A main task with subtasks says what else goes, because parent_id cascades in
+  // the database and losing five pieces of work by surprise is not recoverable
+  await page.getByPlaceholder('What needs doing?').fill('Build the member edition')
+  await page.getByRole('button', { name: /Add & Notify/ }).click()
+  await expect(page.getByText('Build the member edition')).toBeVisible({ timeout: 20000 })
+
+  // Scoped to this task's group, not `.first()`: with two tasks on the board
+  // `.first()` hung the subtasks off the wrong parent, and every assertion still
+  // passed because the subtasks did exist — just not where the test meant.
+  const group = page.getByTestId('task-group').filter({ hasText: 'Build the member edition' })
+  await group.getByRole('button', { name: '+ Subtask' }).click()
+  const subInput = group.getByPlaceholder("What's the next piece of this?")
+  for (const piece of ['Wire the auth flow', 'Ship the survey screen']) {
+    await subInput.fill(piece)
+    await group.getByRole('button', { name: 'Add', exact: true }).click()
+    await expect(group.getByText(piece)).toBeVisible({ timeout: 15000 })
+  }
+  await expect(group.getByRole('button', { name: /0 of 2 done/ })).toBeVisible()
+
+  const parent = rowFor('Build the member edition')
+  await parent.getByRole('button', { name: 'Delete', exact: true }).click()
+  await expect(parent.getByText('Delete this and its 2 subtasks?')).toBeVisible()
+  await parent.getByRole('button', { name: 'Delete', exact: true }).click()
+
+  await expect(page.getByText(/Deleted .*and its 2 subtasks/)).toBeVisible({ timeout: 15000 })
+  await page.reload()
+  await expect(rowFor('Build the member edition')).toHaveCount(0, { timeout: 15000 })
+  await expect(rowFor('Wire the auth flow')).toHaveCount(0)
+  await expect(rowFor('Ship the survey screen')).toHaveCount(0)
+  // and the untouched one is still there, so the cascade was scoped
+  await expect(rowFor('Keep this one')).toHaveCount(1)
+})

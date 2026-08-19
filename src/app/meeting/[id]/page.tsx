@@ -984,6 +984,8 @@ function OpenWorkRow({ item, nested, today, nameFor, onClose, closing }: {
   closing: string | null
 }) {
   const [expanded, setExpanded] = useState(false)
+  const [showNotes, setShowNotes] = useState(false)
+  const notes = (item.description || '').trim()
   const missed = isOverdue(item, today)
   const kids = item.children || []
   const missedKids = kids.filter(k => isOverdue(k, today)).length
@@ -1020,10 +1022,23 @@ function OpenWorkRow({ item, nested, today, nameFor, onClose, closing }: {
             </span>
             {!nested && <> · {sourceLabel(item)}</>}
           </div>
+          {notes && (
+            <button
+              onClick={() => setShowNotes(!showNotes)}
+              className="block text-xs text-steel-blue hover:underline mt-1"
+            >
+              {showNotes ? 'Hide' : 'Show'} notes
+            </button>
+          )}
+          {showNotes && notes && (
+            <div className="mt-1 text-xs text-near-black whitespace-pre-wrap border-l-2 border-light-gray pl-2">
+              {notes}
+            </div>
+          )}
           {kids.length > 0 && (
             <button
               onClick={() => setExpanded(!expanded)}
-              className="text-xs text-steel-blue hover:underline mt-1"
+              className="block text-xs text-steel-blue hover:underline mt-1"
             >
               {showKids ? 'Hide' : 'Show'} {kids.length} open subtask{kids.length === 1 ? '' : 's'}
               {missedKids > 0 && <span className="text-coral-red font-semibold"> · {missedKids} missed</span>}
@@ -1059,6 +1074,7 @@ function WeeklyCommitments({ meetingId, participants, currentUserId }: {
   const [title, setTitle] = useState('')
   const [assignee, setAssignee] = useState('')
   const [due, setDue] = useState('')
+  const [notes, setNotes] = useState('')
   const [notifyEmail, setNotifyEmail] = useState(true)
   const [notifySlack, setNotifySlack] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -1084,6 +1100,7 @@ function WeeklyCommitments({ meetingId, participants, currentUserId }: {
       creator_id: currentUserId,
       assignee_id: assignee,
       title: title.trim(),
+      description: notes.trim(),
       due_date: due || null,
       notify_email: notifyEmail,
       notify_slack: notifySlack,
@@ -1093,6 +1110,7 @@ function WeeklyCommitments({ meetingId, participants, currentUserId }: {
     } else {
       setTitle('')
       setDue('')
+      setNotes('')
       await refetch()
     }
     setSaving(false)
@@ -1136,6 +1154,11 @@ function WeeklyCommitments({ meetingId, participants, currentUserId }: {
                 {c.notify_email && <span> · email</span>}
                 {c.notify_slack && <span> · slack</span>}
               </div>
+              {(c.description || '').trim() && (
+                <div className="mt-1 text-xs text-near-black whitespace-pre-wrap border-l-2 border-light-gray pl-2">
+                  {c.description.trim()}
+                </div>
+              )}
             </div>
           </div>
         ))}
@@ -1162,6 +1185,13 @@ function WeeklyCommitments({ meetingId, participants, currentUserId }: {
         >
           {participants.map(p => <option key={p.id} value={p.id}>{p.full_name || p.email}</option>)}
         </select>
+        <textarea
+          className="md:col-span-3 border border-light-gray rounded-lg px-3 py-2 text-sm focus:border-steel-blue focus:outline-none resize-y"
+          rows={notes ? 3 : 1}
+          placeholder="Notes and context (optional) — travels with the task into Slack and email"
+          value={notes}
+          onChange={e => setNotes(e.target.value)}
+        />
         <div className="flex items-center gap-3 text-sm text-gray">
           <label className="flex items-center gap-1"><input type="checkbox" checked={notifyEmail} onChange={e => setNotifyEmail(e.target.checked)} /> Email</label>
           <label className="flex items-center gap-1"><input type="checkbox" checked={notifySlack} onChange={e => setNotifySlack(e.target.checked)} /> Slack</label>
