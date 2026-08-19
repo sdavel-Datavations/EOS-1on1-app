@@ -171,8 +171,8 @@ export default function TeamPage() {
           <nav className="flex items-center gap-3 text-sm">
             <Link href="/" className="text-white/60 hover:text-white transition">Agenda</Link>
             <Link href="/tasks" className="text-white/60 hover:text-white transition">Tasks</Link>
-            <span className="text-white font-semibold">Team</span>
             <Link href="/metrics" className="text-white/60 hover:text-white transition">Metrics</Link>
+            <span className="text-white font-semibold">Team</span>
           </nav>
         </div>
         <div className="flex items-center gap-3 sm:gap-4">

@@ -97,8 +97,8 @@ export default function MetricsPage() {
           <nav className="flex items-center gap-3 text-sm">
             <Link href="/" className="text-white/60 hover:text-white transition">Agenda</Link>
             <Link href="/tasks" className="text-white/60 hover:text-white transition">Tasks</Link>
-            <Link href="/team" className="text-white/60 hover:text-white transition">Team</Link>
             <span className="text-white font-semibold">Metrics</span>
+            <Link href="/team" className="text-white/60 hover:text-white transition">Team</Link>
           </nav>
         </div>
         <div className="flex items-center gap-3 sm:gap-4">
