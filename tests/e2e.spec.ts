@@ -1071,14 +1071,37 @@ test('metrics show your own numbers and say when scope is just you', async ({ pa
   // A fresh account manages nobody, so scope is one person and the page says so
   // instead of looking broken.
   await expect(page.getByText(/Only your own numbers so far/)).toBeVisible({ timeout: 15000 })
-  await expect(page.getByText('Metrics Tester')).toBeVisible()
+  // The heading on their card, not the name in the header — that matches twice.
+  await expect(page.getByRole('heading', { name: 'Metrics Tester' })).toBeVisible()
 
   // One open task, already past its date
   await expect(page.getByText('Overdue')).toBeVisible()
   // Too little finished work to publish a rate, and it says that rather than 0%
   await expect(page.getByText(/not enough data/)).toBeVisible()
 
-  // The period control changes the closed-work window without reloading
+  // Thirty days by default, and the label matches the window rather than being
+  // one day out from the preset that set it
+  await expect(page.getByText(/Closed \/ 30d/)).toBeVisible()
+
+  // A preset just fills the dates in; the dates are what count
   await page.getByRole('button', { name: '7 days' }).click()
   await expect(page.getByText(/Closed \/ 7d/)).toBeVisible()
+  const from = await page.getByLabel('From', { exact: true }).inputValue()
+  const to = await page.getByLabel('To', { exact: true }).inputValue()
+  expect(from < to).toBe(true)
+
+  // Dates can be picked directly, not only through a preset
+  await page.getByLabel('From', { exact: true }).fill('2026-08-01')
+  await page.getByLabel('To', { exact: true }).fill('2026-08-10')
+  await expect(page.getByText(/Closed \/ 10d/)).toBeVisible()
+
+  // A backwards range is refused rather than silently measuring nothing
+  await page.getByLabel('From', { exact: true }).fill('2026-08-20')
+  await expect(page.getByText(/From date is after the To date/)).toBeVisible()
+  await page.getByLabel('From', { exact: true }).fill('2026-08-01')
+
+  // Comparison names the window it is comparing against, and says what it excludes
+  await page.getByRole('checkbox', { name: /Compare with the previous/ }).check()
+  await expect(page.getByText(/22 Jul 2026 – 31 Jul 2026/)).toBeVisible()
+  await expect(page.getByText(/Only closed work is compared/)).toBeVisible()
 })

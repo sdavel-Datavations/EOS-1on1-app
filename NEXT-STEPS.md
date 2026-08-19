@@ -161,6 +161,15 @@ There is no Anthropic key and no LLM dependency.
 - **`commitment_events` is what keeps it honest.** Due dates are editable, so
   `completed_at <= due_date` alone would call a task punctual even if the deadline had been
   moved to stay ahead of it. Deadline moves are counted per person and shown next to the rate.
+- **Any date range, 30 days by default.** Presets only fill the two date inputs in; the dates
+  are the source of truth. A preset means exactly N days *including today*, because a button
+  reading "7 days" above a card reading `Closed / 8d` is the kind of small lie that makes
+  people stop trusting the rest of the page.
+- **Comparison is against the equal-length window ending the day before** — same length rather
+  than the previous calendar month, so neither period is flattered by simply being longer.
+  Only closed work is compared: open, overdue and oldest-open describe today, not a period.
+  A delta is suppressed when either window is below the four-task minimum, since comparing a
+  number against "not enough data" invents a trend.
 - Flow counts **handovers only** — self-assigned work would swamp it and says nothing about
   work moving between people.
 - `is_admin()` is global, not per-department. If a second department ever needs its own admin,

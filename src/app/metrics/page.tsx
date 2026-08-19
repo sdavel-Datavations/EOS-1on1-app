@@ -4,20 +4,54 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { useAuth, useMetrics } from '@/lib/hooks'
 import {
-  statsFor, onTimeRate, assignmentFlow, closureChannels, windowStart,
-  type PersonStats,
+  statsFor, onTimeRate, assignmentFlow, closureChannels, addDays,
+  previousRange, rangeLength, type PersonStats,
 } from '@/lib/metrics'
+import { todayISO } from '@/lib/tracker'
+import { quarterOf, quarterRange } from '@/lib/quarters'
 import { COMPLETED_VIA_LABEL } from '@/lib/types'
 
-const PERIODS = [
-  { days: 7, label: '7 days' },
-  { days: 30, label: '30 days' },
-  { days: 90, label: '90 days' },
+/**
+ * N days ending today, counting today.
+ *
+ * Inclusive on both ends so the label matches the window: today-7 through today is
+ * eight days, and a button reading "7 days" over a card reading "Closed / 8d" is
+ * the kind of small lie that makes people stop trusting the rest.
+ */
+function lastNDays(n: number, today: string) {
+  return { from: addDays(today, -(n - 1)), to: today }
+}
+
+/** Shortcuts that fill the dates in. The dates remain the source of truth. */
+const PRESETS = [
+  { label: '7 days', range: (today: string) => lastNDays(7, today) },
+  { label: '30 days', range: (today: string) => lastNDays(30, today) },
+  { label: '90 days', range: (today: string) => lastNDays(90, today) },
+  {
+    label: 'This quarter',
+    range: (today: string) => {
+      const { start, end } = quarterRange(quarterOf(today))
+      // Not past today: a quarter that has not finished should not be compared
+      // against a full one, and counting to its end would read as a shortfall.
+      return { from: start, to: end < today ? end : today }
+    },
+  },
 ]
+
+function humanDate(iso: string): string {
+  if (!iso) return ''
+  const [y, m, d] = iso.split('-').map(Number)
+  const dt = new Date(Date.UTC(y, m - 1, d))
+  return dt.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
+}
 
 export default function MetricsPage() {
   const { user, loading: authLoading, signOut } = useAuth()
-  const [days, setDays] = useState(30)
+  const today = todayISO()
+  // Thirty days by default, but the dates are what count — presets only fill them in.
+  const [from, setFrom] = useState(() => lastNDays(30, todayISO()).from)
+  const [to, setTo] = useState(() => todayISO())
+  const [comparing, setComparing] = useState(false)
   const { people, tasks, events, loading, error, migrationNeeded, eventsAvailable } = useMetrics(user?.id)
 
   if (authLoading) {
@@ -31,15 +65,24 @@ export default function MetricsPage() {
     )
   }
 
-  const since = windowStart(days)
   const nameFor = (id: string) => {
     const p = people.find(x => x.id === id)
     return p?.full_name || p?.email || 'Someone'
   }
 
-  const stats = people
-    .map(p => statsFor(p.id, tasks, events, { since }))
-    .sort((a, b) => b.overdue - a.overdue || b.open - a.open)
+  const backwards = Boolean(from && to && from > to)
+  const previous = comparing && !backwards ? previousRange(from, to) : null
+  const spanDays = backwards ? 0 : rangeLength(from, to)
+
+  const stats = backwards
+    ? []
+    : people
+        .map(p => statsFor(p.id, tasks, events, { since: from, until: to }))
+        .sort((a, b) => b.overdue - a.overdue || b.open - a.open)
+
+  const priorStats = previous
+    ? new Map(people.map(p => [p.id, statsFor(p.id, tasks, events, { since: previous.from, until: previous.to })]))
+    : null
 
   const flow = assignmentFlow(tasks)
   const channels = closureChannels(tasks)
@@ -85,19 +128,73 @@ export default function MetricsPage() {
           <div className="bg-red-light text-coral-red text-sm p-3 rounded-lg mb-6">{error}</div>
         )}
 
-        <div className="flex items-center gap-2 mb-6 flex-wrap">
-          <span className="text-[11px] font-bold uppercase tracking-wide text-gray">Closed work over</span>
-          {PERIODS.map(p => (
-            <button
-              key={p.days}
-              onClick={() => setDays(p.days)}
-              className={`px-3 py-1 rounded-full text-xs font-semibold transition ${
-                days === p.days ? 'bg-deep-purple text-white' : 'border border-light-gray text-gray hover:border-steel-blue'
-              }`}
-            >
-              {p.label}
-            </button>
-          ))}
+        <div className="bg-white border border-light-gray rounded-xl p-4 mb-6">
+          <div className="flex items-end gap-3 flex-wrap">
+            <div>
+              <label htmlFor="metrics-from" className="text-[11px] font-bold uppercase tracking-wide text-gray block mb-1">
+                From
+              </label>
+              <input
+                id="metrics-from"
+                type="date"
+                value={from}
+                max={to || undefined}
+                onChange={e => setFrom(e.target.value)}
+                className="border border-light-gray rounded-lg px-3 py-2 text-sm focus:border-steel-blue focus:outline-none"
+              />
+            </div>
+            <div>
+              <label htmlFor="metrics-to" className="text-[11px] font-bold uppercase tracking-wide text-gray block mb-1">
+                To
+              </label>
+              <input
+                id="metrics-to"
+                type="date"
+                value={to}
+                min={from || undefined}
+                onChange={e => setTo(e.target.value)}
+                className="border border-light-gray rounded-lg px-3 py-2 text-sm focus:border-steel-blue focus:outline-none"
+              />
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              {PRESETS.map(p => {
+                const r = p.range(today)
+                const active = r.from === from && r.to === to
+                return (
+                  <button
+                    key={p.label}
+                    onClick={() => { setFrom(r.from); setTo(r.to) }}
+                    className={`px-3 py-1 rounded-full text-xs font-semibold transition ${
+                      active ? 'bg-deep-purple text-white' : 'border border-light-gray text-gray hover:border-steel-blue'
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          <label className="flex items-start gap-2 mt-3 text-xs text-gray cursor-pointer">
+            <input
+              type="checkbox"
+              checked={comparing}
+              onChange={e => setComparing(e.target.checked)}
+              className="mt-0.5"
+            />
+            <span>
+              Compare with the previous {spanDays} day{spanDays === 1 ? '' : 's'}
+              {previous && (
+                <span className="text-near-black font-semibold"> · {humanDate(previous.from)} – {humanDate(previous.to)}</span>
+              )}
+            </span>
+          </label>
+
+          {backwards && (
+            <p className="text-xs text-coral-red mt-2">
+              The From date is after the To date, so there is no period to measure.
+            </p>
+          )}
         </div>
 
         {loading ? (
@@ -122,7 +219,23 @@ export default function MetricsPage() {
               </div>
             )}
 
-            {stats.map(s => <PersonCard key={s.personId} s={s} name={nameFor(s.personId)} days={days} eventsAvailable={eventsAvailable} />)}
+            {comparing && (
+              <p className="text-xs text-gray">
+                Only closed work is compared. Open, overdue and oldest-open describe today, not a
+                period, so a change between two windows would mean nothing.
+              </p>
+            )}
+
+            {stats.map(s => (
+              <PersonCard
+                key={s.personId}
+                s={s}
+                prior={priorStats?.get(s.personId) ?? null}
+                name={nameFor(s.personId)}
+                spanDays={spanDays}
+                eventsAvailable={eventsAvailable}
+              />
+            ))}
 
             {openUndated > 0 && (
               <div className="bg-white border border-light-gray rounded-xl p-4">
@@ -186,14 +299,17 @@ export default function MetricsPage() {
 }
 
 /** One person's numbers. Cards rather than a table so nothing scrolls sideways on a phone. */
-function PersonCard({ s, name, days, eventsAvailable }: {
+function PersonCard({ s, prior, name, spanDays, eventsAvailable }: {
   s: PersonStats
+  /** The same person over the preceding window, when comparing. */
+  prior: PersonStats | null
   name: string
-  days: number
+  spanDays: number
   eventsAvailable: boolean
 }) {
   const rate = onTimeRate(s)
   const judged = s.onTime + s.late
+  const priorRate = prior ? onTimeRate(prior) : null
 
   return (
     <div className={`bg-white rounded-xl p-5 border ${s.overdue > 0 ? 'border-coral-red' : 'border-light-gray'}`}>
@@ -207,6 +323,9 @@ function PersonCard({ s, name, days, eventsAvailable }: {
           <span className={`text-sm font-bold ${rate >= 80 ? 'text-green' : rate >= 50 ? 'text-[#e67e22]' : 'text-coral-red'}`}>
             {rate}% on time
             <span className="text-gray font-normal text-xs"> of {judged}</span>
+            {/* Only when both windows have enough to publish a rate; comparing a
+                number against "not enough data" would invent a trend. */}
+            {priorRate !== null && <Delta value={rate - priorRate} suffix="pt" />}
           </span>
         )}
       </div>
@@ -219,11 +338,19 @@ function PersonCard({ s, name, days, eventsAvailable }: {
           value={s.oldestOpenDays === null ? '—' : `${s.oldestOpenDays}d`}
           tone={s.oldestOpenDays !== null && s.oldestOpenDays > 30 ? 'bad' : undefined}
         />
-        <Stat label={`Closed / ${days}d`} value={s.closed} />
+        <Stat
+          label={`Closed / ${spanDays}d`}
+          value={s.closed}
+          delta={prior ? s.closed - prior.closed : undefined}
+        />
       </div>
 
       <p className="text-xs text-gray mt-3">
-        {s.onTime} on time · {s.late} late · {s.undated} closed with no date
+        {s.onTime} on time
+        {prior && <Delta value={s.onTime - prior.onTime} />}
+        {' · '}{s.late} late
+        {prior && <Delta value={s.late - prior.late} goodWhen="down" />}
+        {' · '}{s.undated} closed with no date
         {s.assignedOut > 0 && <> · {s.assignedOut} assigned to others</>}
         {eventsAvailable && s.deadlinesMoved > 0 && (
           <span className="text-[#e67e22]"> · {s.deadlinesMoved} deadline{s.deadlinesMoved === 1 ? '' : 's'} moved</span>
@@ -233,11 +360,37 @@ function PersonCard({ s, name, days, eventsAvailable }: {
   )
 }
 
-function Stat({ label, value, tone }: { label: string; value: number | string; tone?: 'bad' }) {
+/**
+ * Change against the comparison window.
+ *
+ * Direction is not always improvement, so each caller says which way is good:
+ * closing more is progress, being late more often is not.
+ */
+function Delta({ value, goodWhen = 'up', suffix = '' }: {
+  value: number
+  goodWhen?: 'up' | 'down'
+  suffix?: string
+}) {
+  if (value === 0) return <span className="text-light-gray text-xs font-normal"> ±0</span>
+  const good = goodWhen === 'up' ? value > 0 : value < 0
+  return (
+    <span className={`text-xs font-semibold ${good ? 'text-green' : 'text-coral-red'}`}>
+      {' '}{value > 0 ? '+' : '\u2212'}{Math.abs(value)}{suffix}
+    </span>
+  )
+}
+
+function Stat({ label, value, tone, delta }: {
+  label: string
+  value: number | string
+  tone?: 'bad'
+  delta?: number
+}) {
   return (
     <div>
       <div className={`text-xl font-bold tabular-nums ${tone === 'bad' ? 'text-coral-red' : 'text-near-black'}`}>
         {value}
+        {delta !== undefined && <Delta value={delta} />}
       </div>
       <div className="text-[11px] font-bold uppercase tracking-wide text-gray">{label}</div>
     </div>

@@ -77,15 +77,16 @@ export interface PersonStats {
 /**
  * One person's numbers.
  *
- * `since` bounds the closed-work figures only. Open work is open regardless of
- * when it was raised, and cutting it to a window would hide exactly the stale
- * items this is meant to surface.
+ * `since` and `until` bound the closed-work figures only. Open work is open
+ * regardless of when it was raised, and cutting it to a window would hide exactly
+ * the stale items this is meant to surface — which is also why comparing two
+ * periods can only ever compare the closed-work half.
  */
 export function statsFor(
   personId: string,
   tasks: MetricTask[],
   events: MetricEvent[] = [],
-  opts: { since?: string; today?: string } = {},
+  opts: { since?: string; until?: string; today?: string } = {},
 ): PersonStats {
   const today = opts.today ?? todayISO()
   const mine = tasks.filter(t => t.assignee_id === personId)
@@ -93,10 +94,14 @@ export function statsFor(
 
   const closedInWindow = mine.filter(t => {
     if (t.status !== 'done') return false
-    if (!opts.since) return true
+    if (!opts.since && !opts.until) return true
     // A task closed before completed_at existed has no date to place it, so it
     // stays out of a windowed count rather than being credited to this period.
-    return Boolean(t.completed_at) && t.completed_at!.slice(0, 10) >= opts.since
+    if (!t.completed_at) return false
+    const on = t.completed_at.slice(0, 10)
+    if (opts.since && on < opts.since) return false
+    if (opts.until && on > opts.until) return false
+    return true
   })
 
   const punctuality = closedInWindow.map(punctualityOf)
@@ -175,10 +180,34 @@ export function closureChannels(tasks: MetricTask[]): { via: string; count: numb
     .sort((a, b) => b.count - a.count)
 }
 
+/** Shifts a plain date by whole days. UTC arithmetic, so no offset can move it. */
+export function addDays(date: string, days: number): string {
+  const [y, m, d] = date.split('-').map(Number)
+  const dt = new Date(Date.UTC(y, m - 1, d))
+  dt.setUTCDate(dt.getUTCDate() + days)
+  return dt.toISOString().slice(0, 10)
+}
+
 /** `since` for a rolling window of whole days, as a plain date. */
 export function windowStart(days: number, today: string = todayISO()): string {
-  const [y, m, d] = today.split('-').map(Number)
-  const dt = new Date(Date.UTC(y, m - 1, d))
-  dt.setUTCDate(dt.getUTCDate() - days)
-  return dt.toISOString().slice(0, 10)
+  return addDays(today, -days)
+}
+
+/** Days covered by a range, counting both ends. */
+export function rangeLength(from: string, to: string): number {
+  const [ay, am, ad] = from.split('-').map(Number)
+  const [by, bm, bd] = to.split('-').map(Number)
+  return Math.round((Date.UTC(by, bm - 1, bd) - Date.UTC(ay, am - 1, ad)) / 86400000) + 1
+}
+
+/**
+ * The equal-length window ending the day before `from`.
+ *
+ * Same length rather than same calendar month, so a comparison is never flattered
+ * or punished by one period simply being longer than the other.
+ */
+export function previousRange(from: string, to: string): { from: string; to: string } {
+  const length = rangeLength(from, to)
+  const prevTo = addDays(from, -1)
+  return { from: addDays(prevTo, -(length - 1)), to: prevTo }
 }

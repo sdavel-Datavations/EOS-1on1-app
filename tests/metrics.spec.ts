@@ -1,7 +1,8 @@
 import { test, expect } from '@playwright/test'
 import {
   punctualityOf, isOverdueTask, ageInDays, statsFor, onTimeRate,
-  assignmentFlow, closureChannels, windowStart, type MetricTask,
+  assignmentFlow, closureChannels, windowStart, addDays, rangeLength, previousRange,
+  type MetricTask,
 } from '../src/lib/metrics'
 
 const TODAY = '2026-08-19'
@@ -189,5 +190,67 @@ test.describe('windowStart', () => {
     expect(windowStart(30, TODAY)).toBe('2026-07-20')
     expect(windowStart(7, TODAY)).toBe('2026-08-12')
     expect(windowStart(0, TODAY)).toBe(TODAY)
+  })
+})
+
+test.describe('date ranges', () => {
+  test('addDays crosses month and year ends without drifting', () => {
+    expect(addDays('2026-08-19', 1)).toBe('2026-08-20')
+    expect(addDays('2026-08-31', 1)).toBe('2026-09-01')
+    expect(addDays('2026-01-01', -1)).toBe('2025-12-31')
+    expect(addDays('2026-08-19', 0)).toBe('2026-08-19')
+  })
+
+  test('rangeLength counts both ends', () => {
+    // A single day is a range of one, not zero — otherwise a one-day comparison
+    // window would have nothing to compare against.
+    expect(rangeLength('2026-08-19', '2026-08-19')).toBe(1)
+    expect(rangeLength('2026-08-01', '2026-08-31')).toBe(31)
+    expect(rangeLength('2026-07-20', '2026-08-19')).toBe(31)
+  })
+
+  test('previousRange is the same length, ending the day before', () => {
+    // Same length rather than the previous calendar month, so neither period is
+    // flattered simply by being longer.
+    expect(previousRange('2026-08-01', '2026-08-31')).toEqual({ from: '2026-07-01', to: '2026-07-31' })
+    expect(previousRange('2026-08-19', '2026-08-19')).toEqual({ from: '2026-08-18', to: '2026-08-18' })
+    const prev = previousRange('2026-07-20', '2026-08-19')
+    expect(rangeLength(prev.from, prev.to)).toBe(31)
+    expect(prev.to).toBe('2026-07-19')
+  })
+})
+
+test.describe('statsFor with a closed window', () => {
+  const tasks: MetricTask[] = [
+    task({ id: 'in', status: 'done', due_date: '2026-08-10', completed_at: '2026-08-10T09:00:00Z' }),
+    task({ id: 'before', status: 'done', due_date: '2026-07-01', completed_at: '2026-07-01T09:00:00Z' }),
+    task({ id: 'after', status: 'done', due_date: '2026-08-18', completed_at: '2026-08-18T09:00:00Z' }),
+    task({ id: 'open1', due_date: '2026-08-01' }),
+  ]
+
+  test('until excludes work closed after the window', () => {
+    const s = statsFor('ash', tasks, [], { since: '2026-08-05', until: '2026-08-15', today: TODAY })
+    expect(s.closed).toBe(1)
+  })
+
+  test('open work ignores the window entirely', () => {
+    // Comparing two periods can only compare closed work; "open" is a fact about
+    // now, and windowing it would hide the stale items this exists to surface.
+    const narrow = statsFor('ash', tasks, [], { since: '2026-08-05', until: '2026-08-15', today: TODAY })
+    const wide = statsFor('ash', tasks, [], { since: '2026-01-01', until: '2026-12-31', today: TODAY })
+    expect(narrow.open).toBe(1)
+    expect(wide.open).toBe(1)
+    expect(narrow.overdue).toBe(1)
+  })
+
+  test('the two halves of a comparison do not overlap', () => {
+    const from = '2026-08-05', to = '2026-08-15'
+    const prev = previousRange(from, to)
+    const current = statsFor('ash', tasks, [], { since: from, until: to, today: TODAY })
+    const before = statsFor('ash', tasks, [], { since: prev.from, until: prev.to, today: TODAY })
+    // 'in' falls in the current window; 'before' (1 Jul) is outside both
+    expect(current.closed).toBe(1)
+    expect(before.closed).toBe(0)
+    expect(prev.to < from).toBe(true)
   })
 })
