@@ -93,6 +93,47 @@ export function escapeHtml(text: string): string {
     .replace(/"/g, '&quot;')
 }
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+
+/**
+ * '2026-08-20' -> 'Thu 20 Aug 2026'.
+ *
+ * Built from the parts in UTC rather than parsed from the string: new
+ * Date('2026-08-20') is UTC midnight, which prints as the 19th anywhere west of
+ * Greenwich — so a task due tomorrow would name yesterday in the email.
+ */
+export function formatDueDate(iso: string | null | undefined): string {
+  if (!iso) return ''
+  const [y, m, d] = iso.split('-').map(Number)
+  if (!y || !m || !d) return ''
+  const dt = new Date(Date.UTC(y, m - 1, d))
+  return `${DAYS[dt.getUTCDay()]} ${d} ${MONTHS[m - 1]} ${y}`
+}
+
+/**
+ * The subject line has one job: say that work has been handed to you, by whom,
+ * and when it is wanted — in that order, because an inbox shows the front of the
+ * line and little else. "Tomorrow: Test" met none of that.
+ */
+export function taskSubject(args: {
+  title: string
+  askedBy: string
+  dueLabel: string
+  hasDueDate: boolean
+  selfAssigned?: boolean
+  overdue?: boolean
+}): string {
+  const head = args.selfAssigned
+    ? `New task: ${args.title}`
+    : `${args.askedBy} assigned you a task: ${args.title}`
+  if (!args.hasDueDate) return head
+  // "3 days overdue" already reads as a sentence; "Tomorrow" needs the verb.
+  return args.overdue
+    ? `${head} — ${args.dueLabel.toLowerCase()}`
+    : `${head} — due ${args.dueLabel.toLowerCase()}`
+}
+
 /** The email twin of the Slack task message. */
 export function taskEmail(args: {
   firstName: string
@@ -102,40 +143,76 @@ export function taskEmail(args: {
   meetingDate: string | null
   completeUrl: string
   notes?: string | null
+  dueDate?: string | null
+  selfAssigned?: boolean
+  overdue?: boolean
 }): { subject: string; html: string; text: string } {
   const notes = (args.notes || '').trim()
-  const context = args.meetingDate
-    ? `${args.askedBy} raised this in your 1-on-1 on ${args.meetingDate}.`
-    : `${args.askedBy} added this during the week.`
+  const hasDueDate = Boolean(args.dueDate)
 
-  const subject = `${args.dueLabel}: ${args.title}`
+  const subject = taskSubject({
+    title: args.title,
+    askedBy: args.askedBy,
+    dueLabel: args.dueLabel,
+    hasDueDate,
+    selfAssigned: args.selfAssigned,
+    overdue: args.overdue,
+  })
+
+  const dueText = hasDueDate
+    ? `${args.overdue ? args.dueLabel : `Due ${args.dueLabel.toLowerCase()}`} · ${formatDueDate(args.dueDate)}`
+    : 'No due date'
+
+  const who = args.selfAssigned
+    ? 'You added this task for yourself.'
+    : `${args.askedBy} assigned you a task.`
+
+  const origin = args.meetingDate
+    ? `Raised in your 1-on-1 on ${formatDueDate(args.meetingDate) || args.meetingDate}.`
+    : 'Added during the week.'
 
   const text = [
     `Hi ${args.firstName},`,
     '',
-    args.title,
-    args.dueLabel,
+    who,
+    '',
+    `TASK: ${args.title}`,
+    dueText,
     ...(notes ? ['', notes] : []),
     '',
-    context,
+    origin,
     '',
     `Mark it done: ${args.completeUrl}`,
   ].join('\n')
 
+  const dueColour = args.overdue ? '#e74c3c' : '#666'
+  // The accent bar carries the same signal as the date text. A blue bar on a task
+  // three days late reads as fine at a glance, which is the glance that matters.
+  const accent = args.overdue ? '#e74c3c' : '#2b7ba8'
+
   const html = `
 <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:520px;color:#1a1a1a">
-  <p>Hi ${escapeHtml(args.firstName)},</p>
-  <p style="font-size:17px;font-weight:600;margin:0 0 4px">${escapeHtml(args.title)}</p>
-  <p style="margin:0 0 16px;color:#666;font-size:14px">${escapeHtml(args.dueLabel)}</p>
-  ${notes ? `<div style="white-space:pre-wrap;border-left:3px solid #e5e5e5;padding-left:12px;margin:0 0 16px;font-size:14px;line-height:1.5">${escapeHtml(notes)}</div>` : ''}
-  <p style="color:#666;font-size:14px">${escapeHtml(context)}</p>
-  <p style="margin:24px 0">
+  <p style="margin:0 0 14px;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#5b2c6f">
+    New task assigned
+  </p>
+  <p style="margin:0 0 4px;font-size:14px">Hi ${escapeHtml(args.firstName)},</p>
+  <p style="margin:0 0 18px;font-size:14px">${escapeHtml(who)}</p>
+
+  <div style="border:1px solid #e5e5e5;border-left:4px solid ${accent};border-radius:8px;padding:14px 16px;margin:0 0 20px">
+    <p style="margin:0 0 6px;font-size:18px;font-weight:700;line-height:1.3">${escapeHtml(args.title)}</p>
+    <p style="margin:0;font-size:13px;font-weight:600;color:${dueColour}">${escapeHtml(dueText)}</p>
+    ${notes ? `<div style="white-space:pre-wrap;margin:12px 0 0;padding-top:12px;border-top:1px solid #eee;font-size:14px;line-height:1.5">${escapeHtml(notes)}</div>` : ''}
+  </div>
+
+  <p style="margin:0 0 20px">
     <a href="${escapeHtml(args.completeUrl)}"
-       style="background:#2b7ba8;color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px;font-weight:600;font-size:14px">
+       style="background:#2b7ba8;color:#fff;text-decoration:none;padding:11px 20px;border-radius:8px;font-weight:600;font-size:14px;display:inline-block">
       Mark done
     </a>
   </p>
-  <p style="color:#999;font-size:12px">Datavations · Weekly 1-on-1</p>
+
+  <p style="margin:0 0 4px;color:#999;font-size:12px">${escapeHtml(origin)}</p>
+  <p style="margin:0;color:#999;font-size:12px">Datavations · Weekly 1-on-1</p>
 </div>`.trim()
 
   return { subject, html, text }

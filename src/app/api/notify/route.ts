@@ -158,18 +158,19 @@ async function run(commitmentId?: string) {
     }
 
     const dueLabel = row.due_date ? describeDue(row.due_date, today) : 'No due date'
+    const overdue = Boolean(row.due_date && row.due_date < today)
     const askedBy = normalizeOne(row.creator)?.full_name || 'Someone on your team'
     const meetingDate = normalizeOne(row.meeting)?.meeting_date ?? null
     let delivered = false
 
     if (slackOn && row.notify_slack) {
-      const res = await sendSlack(sb, { row, assignee, dueLabel, askedBy, meetingDate })
+      const res = await sendSlack(sb, { row, assignee, dueLabel, askedBy, meetingDate, overdue })
       outcome.slack = res
       if (res === 'sent') delivered = true
     }
 
     if (mailOn && row.notify_email && assignee.email) {
-      const res = await sendEmail(sb, { row, assignee, dueLabel, askedBy, meetingDate })
+      const res = await sendEmail(sb, { row, assignee, dueLabel, askedBy, meetingDate, overdue })
       outcome.email = res
       if (res === 'sent') delivered = true
     }
@@ -203,6 +204,8 @@ type SendArgs = {
   dueLabel: string
   askedBy: string
   meetingDate: string | null
+  /** Computed once from the loop's `today`, so it cannot disagree with dueLabel. */
+  overdue: boolean
 }
 
 async function sendSlack(
@@ -259,7 +262,7 @@ async function sendSlack(
 
 async function sendEmail(
   sb: ReturnType<typeof serviceClient>,
-  { row, assignee, dueLabel, askedBy, meetingDate }: SendArgs,
+  { row, assignee, dueLabel, askedBy, meetingDate, overdue }: SendArgs,
 ): Promise<string> {
   if (!assignee.email) return 'skipped: no email address'
 
@@ -283,6 +286,10 @@ async function sendEmail(
     meetingDate,
     completeUrl,
     notes: row.description,
+    dueDate: row.due_date,
+    // A task you wrote for yourself should not claim someone assigned it to you.
+    selfAssigned: row.creator_id === assignee.id,
+    overdue,
   })
 
   const { error } = await sendMail({ to: assignee.email, subject, html, text })
