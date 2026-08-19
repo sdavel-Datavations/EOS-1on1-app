@@ -667,7 +667,9 @@ function Row({
 
   // An overdue task reads red at the row level, not just in its date text: the
   // date is the smallest thing on the row and easy to skim past.
-  const base = 'flex items-center gap-3 p-3'
+  // items-start, not items-center: with notes expanded the row grows tall and a
+  // centred checkbox drifts away from the title it belongs to.
+  const base = 'flex items-start gap-3 p-3'
   const surface = overdue
     ? 'bg-red-light border-coral-red'
     : 'bg-white border-light-gray'
@@ -686,7 +688,7 @@ function Row({
           onClick={onToggle}
           disabled={busy}
           title={isDone ? 'Mark as open' : 'Mark as done'}
-          className={`w-6 h-6 rounded flex items-center justify-center text-xs border-2 flex-shrink-0 transition disabled:opacity-50 ${
+          className={`w-6 h-6 mt-px rounded flex items-center justify-center text-xs border-2 flex-shrink-0 transition disabled:opacity-50 ${
             isDone ? 'bg-green border-green text-white' : 'border-light-gray text-transparent hover:border-green'
           }`}
         >
@@ -695,7 +697,7 @@ function Row({
       ) : (
         <span
           title="Someone else's task — you can see it, but only they can close it"
-          className={`w-6 h-6 rounded flex items-center justify-center text-xs border-2 border-dashed flex-shrink-0 ${
+          className={`w-6 h-6 mt-px rounded flex items-center justify-center text-xs border-2 border-dashed flex-shrink-0 ${
             isDone ? 'bg-green border-green text-white' : 'border-light-gray text-transparent'
           }`}
         >
