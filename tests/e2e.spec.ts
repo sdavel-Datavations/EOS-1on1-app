@@ -1182,10 +1182,50 @@ test('the delivery log is admins only', async ({ page, request }) => {
   expect(asMember.status).toBe(403)
   expect(JSON.stringify(asMember.body)).toContain('Admins only')
 
-  // And the panel is not on the page for them
+  // Not on /metrics, and not in the nav either — the tab is admin-only, and this
+  // assertion covers both because the link carries the same word.
   await page.goto('/metrics')
   await expect(page.getByRole('heading', { name: 'Accountability' })).toBeVisible({ timeout: 15000 })
   await expect(page.getByText('Delivery')).toHaveCount(0)
+
+  // Reaching the page directly is refused by the route, so a member sees the reason
+  // rather than an empty panel that looks like "nothing is wrong".
+  await page.goto('/delivery')
+  await expect(page.getByText('This page is for admins')).toBeVisible({ timeout: 15000 })
+  await expect(page.getByText(/unanswered failure/)).toHaveCount(0)
+})
+
+test('every page still renders behind the shared nav', async ({ page }) => {
+  // The header used to be copy-pasted into each page; it is one component now. A
+  // mistake in it takes down every page at once, and the suite would otherwise not
+  // notice: nothing else here asserts that a signed-in page renders at all. That is
+  // exactly how a hook placed below an early return once broke /team in silence.
+  await seedAndLogin(page, `nav+${Date.now()}@example.com`, 'Password123!', 'Nav Tester')
+
+  // Headings, not placeholders — getByText cannot see a placeholder, and the point
+  // is to prove the body rendered and not only the header.
+  const pages: [string, string][] = [
+    ['/', 'New Meeting'],
+    ['/tasks', 'Tasks'],
+    ['/team', 'Team'],
+    ['/metrics', 'Accountability'],
+  ]
+
+  for (const [path, heading] of pages) {
+    await page.goto(path)
+    await expect(page.getByRole('heading', { name: heading, exact: true }))
+      .toBeVisible({ timeout: 15000 })
+    // Scoped to the <nav>: "Tasks" is also the summary card on the dashboard, and an
+    // unscoped match resolves to two elements. Text rather than a link, because the
+    // current page renders its own tab as a plain span.
+    const nav = page.getByRole('navigation')
+    for (const tab of ['Agenda', 'Tasks', 'Metrics', 'Team']) {
+      await expect(nav.getByText(tab, { exact: true })).toBeVisible()
+    }
+    // Admin-only, and this account is a member.
+    await expect(nav.getByText('Delivery', { exact: true })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible()
+  }
 })
 
 test('a scheduled run leaves a heartbeat even when it cannot send', async ({ request }) => {

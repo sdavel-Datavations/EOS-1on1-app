@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import Link from 'next/link'
 import { useAuth, useMetrics } from '@/lib/hooks'
 import {
@@ -10,6 +10,7 @@ import {
 import { todayISO } from '@/lib/tracker'
 import { quarterOf, quarterRange } from '@/lib/quarters'
 import { COMPLETED_VIA_LABEL } from '@/lib/types'
+import { AppNav } from '@/components/AppNav'
 
 /**
  * N days ending today, counting today.
@@ -91,23 +92,12 @@ export default function MetricsPage() {
 
   return (
     <div className="min-h-screen">
-      <header className="bg-deep-purple px-4 sm:px-6 py-3 flex items-center justify-between gap-x-3 gap-y-2 flex-wrap sticky top-0 z-50">
-        <div className="flex items-center gap-3 sm:gap-4">
-          <span className="text-white font-bold tracking-wider text-lg">DATAVATIONS</span>
-          <nav className="flex items-center gap-3 text-sm">
-            <Link href="/" className="text-white/60 hover:text-white transition">Agenda</Link>
-            <Link href="/tasks" className="text-white/60 hover:text-white transition">Tasks</Link>
-            <span className="text-white font-semibold">Metrics</span>
-            <Link href="/team" className="text-white/60 hover:text-white transition">Team</Link>
-          </nav>
-        </div>
-        <div className="flex items-center gap-3 sm:gap-4">
-          <span className="text-steel-blue font-semibold text-sm hidden sm:inline">{user.full_name}</span>
-          <button onClick={signOut} className="text-white/60 text-sm hover:text-white transition">
-            Sign out
-          </button>
-        </div>
-      </header>
+      <AppNav
+        current="/metrics"
+        userName={user.full_name}
+        isAdmin={user.access_level === 'admin'}
+        onSignOut={signOut}
+      />
 
       <main className="max-w-3xl mx-auto px-4 py-8">
         <h1 className="text-lg font-bold text-deep-purple mb-1">Accountability</h1>
@@ -271,8 +261,6 @@ export default function MetricsPage() {
               </div>
             )}
 
-            {user.access_level === 'admin' && <DeliveryPanel />}
-
             {channels.length > 0 && (
               <div className="bg-white border border-light-gray rounded-xl p-5">
                 <h2 className="text-[11px] font-bold uppercase tracking-wide text-medium-purple mb-1">
@@ -296,108 +284,6 @@ export default function MetricsPage() {
           </div>
         )}
       </main>
-    </div>
-  )
-}
-
-interface LogRow {
-  created_at: string
-  channel: string
-  event: string
-  status: string
-  detail: string | null
-}
-
-/**
- * Whether the notification system is actually running.
- *
- * Two questions this answers that nothing else could: has the scheduled pass
- * happened, and did anything fail to reach someone. Both previously required
- * querying the database by hand — which means in practice nobody would, and a DM
- * that silently failed to a colleague would never be noticed.
- */
-function DeliveryPanel() {
-  const [rows, setRows] = useState<LogRow[]>([])
-  const [lastRun, setLastRun] = useState<LogRow | null>(null)
-  const [problems, setProblems] = useState<LogRow[]>([])
-  const [error, setError] = useState<string | null>(null)
-  const [loaded, setLoaded] = useState(false)
-
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      try {
-        const res = await fetch('/api/notifications/recent')
-        const json = await res.json()
-        if (cancelled) return
-        if (!res.ok) setError(json.error || 'Could not read the delivery log.')
-        else {
-          setRows(json.rows || [])
-          setLastRun(json.lastRun || null)
-          setProblems(json.problems || [])
-        }
-      } catch {
-        if (!cancelled) setError('Could not reach the delivery log.')
-      }
-      if (!cancelled) setLoaded(true)
-    })()
-    return () => { cancelled = true }
-  }, [])
-
-  const when = (iso: string) => new Date(iso).toLocaleString('en-GB', {
-    day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
-  })
-
-  return (
-    <div className="bg-white border border-light-gray rounded-xl p-5">
-      <h2 className="text-[11px] font-bold uppercase tracking-wide text-medium-purple mb-1">
-        Delivery
-      </h2>
-      <p className="text-xs text-gray mb-3">
-        Whether notifications are reaching people. Admins only.
-      </p>
-
-      {error && <p className="text-sm text-coral-red">{error}</p>}
-
-      {!error && loaded && (
-        <div className="space-y-3">
-          <div className="text-sm">
-            {lastRun ? (
-              <>
-                <span className="text-near-black font-semibold">Scheduled run:</span>{' '}
-                <span className="text-gray">{when(lastRun.created_at)} — {lastRun.detail}</span>
-              </>
-            ) : (
-              <span className="text-[#e67e22]">
-                The scheduled run has not been seen yet. It writes a line here every time it
-                fires, including when there is nothing due — so once one appears, the cron is
-                confirmed working.
-              </span>
-            )}
-          </div>
-
-          {problems.length === 0 ? (
-            <p className="text-sm text-green">No delivery failures in the last 40 events.</p>
-          ) : (
-            <div>
-              <p className="text-sm text-coral-red font-semibold mb-1">
-                {problems.length} failure{problems.length === 1 ? '' : 's'}
-              </p>
-              <div className="space-y-1">
-                {problems.slice(0, 6).map((r, i) => (
-                  <div key={`${r.created_at}-${i}`} className="text-xs text-gray">
-                    <span className="tabular-nums">{when(r.created_at)}</span>{' '}
-                    <span className="font-semibold text-near-black">{r.channel}</span>{' '}
-                    {r.detail || 'no detail recorded'}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <p className="text-[11px] text-light-gray">{rows.length} recent events</p>
-        </div>
-      )}
     </div>
   )
 }

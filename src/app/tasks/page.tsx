@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useAuth } from '@/lib/hooks'
 import TaskBoard from '@/components/TaskBoard'
+import { AppNav } from '@/components/AppNav'
 
 /**
  * The day-to-day task page.
@@ -37,23 +38,12 @@ export default function TasksPage() {
 
   return (
     <div className="min-h-screen">
-      <header className="bg-deep-purple px-4 sm:px-6 py-3 flex items-center justify-between gap-x-3 gap-y-2 flex-wrap sticky top-0 z-50">
-        <div className="flex items-center gap-3 sm:gap-4">
-          <span className="text-white font-bold tracking-wider text-lg">DATAVATIONS</span>
-          <nav className="flex items-center gap-3 text-sm">
-            <Link href="/" className="text-white/60 hover:text-white transition">Agenda</Link>
-            <span className="text-white font-semibold">Tasks</span>
-            <Link href="/metrics" className="text-white/60 hover:text-white transition">Metrics</Link>
-            <Link href="/team" className="text-white/60 hover:text-white transition">Team</Link>
-          </nav>
-        </div>
-        <div className="flex items-center gap-3 sm:gap-4">
-          <span className="text-steel-blue font-semibold text-sm hidden sm:inline">{user.full_name}</span>
-          <button onClick={signOut} className="text-white/60 text-sm hover:text-white transition">
-            Sign out
-          </button>
-        </div>
-      </header>
+      <AppNav
+        current="/tasks"
+        userName={user.full_name}
+        isAdmin={user.access_level === 'admin'}
+        onSignOut={signOut}
+      />
 
       <main className="max-w-3xl mx-auto px-4 py-8">
         <h1 className="text-lg font-bold text-deep-purple mb-1">Tasks</h1>

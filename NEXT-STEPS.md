@@ -9,7 +9,7 @@ that notices when a week gets skipped.
 
 ## State as of 2026-08-19
 
-- **14 migrations, all applied.** 304 tests pass. `npm run build` is clean; `npm run lint`
+- **14 migrations, all applied.** 332 tests pass, in 3.6 minutes. `npm run build` is clean; `npm run lint`
   is not, and never has been — see the last item under Known gaps.
 - **Everything is pushed.** Nothing local.
 - **One real account:** sam@datavations.com — `access_level` admin, department Marketing,
@@ -142,12 +142,29 @@ says one *happened*. The gap is the feature.
   scope held server-side, and it still would not say whether the 1-on-1 *happened*. A sensible
   addition on top later, not instead.
 
-**Delivery visibility.** Every scheduled run writes a heartbeat to `notification_log` —
-including quiet runs and ones that fail for want of a channel — because a run that sends
-nothing used to write nothing, making "never fired" and "fired quietly" identical. A *manual*
-send deliberately writes none. `/metrics` shows admins the last run and any failures via
-`/api/notifications/recent` (service role behind an admin check, since the table's RLS only
-exposes rows about yourself).
+**Delivery** (`/delivery`, admin-only tab). Every scheduled run writes a heartbeat to
+`notification_log` — including quiet runs and ones that fail for want of a channel — because a
+run that sends nothing used to write nothing, making "never fired" and "fired quietly"
+identical. A *manual* send deliberately writes none. The page reads
+`/api/notifications/recent`: service role behind an admin check, since the table's RLS only
+exposes rows about yourself.
+
+- **A failure is answered by a later success on the same channel**, and only unanswered ones
+  are counted. The panel used to call every failed row a failure for all time, so two config
+  mistakes from one afternoon sat on screen permanently after email started working — which is
+  the fastest way to teach someone to ignore a monitoring panel.
+- **Health is asked for directly, not inferred from a window of recent rows.** A channel's last
+  success can sit well outside any such window once the log has volume, which would read as
+  "email is broken" rather than "email was broken yesterday".
+- **"Never used" is distinct from "healthy".** A channel that has sent nothing has proved
+  nothing — the same reason the cron looked fine for a fortnight while never having run.
+- It sat on `/metrics` only because that was the only admin-gated page. Nothing about delivery
+  is a measure of anyone's work, and `/metrics` is now only about people.
+
+**The header is one component** (`src/components/AppNav.tsx`). It was copy-pasted into four
+pages, so reordering the tabs was the same edit four times with nothing to stop the copies
+drifting. A test walks every page asserting the nav and a heading render, because nothing else
+did — and a mistake in a shared header takes down every page at once.
 
 ## Conventions to keep
 
@@ -183,6 +200,18 @@ exposes rows about yourself).
   than the row. Assert on rows when checking something is gone.
 - **`getByLabel` substring-matches case-insensitively**, and Next's dev overlay is labelled
   "Open Next.js Dev Tools" — so `getByLabel('To')` matches it. Use `{ exact: true }`.
+- **Never run two suites at once.** `globalTeardown` deletes *every* `@example.com` account,
+  not only the ones its own run created — so a second run wipes the first run's accounts
+  mid-test. Sessions die, pages bounce to the sign-in card, and you get a dozen unrelated
+  failures clustered in whichever run was still going. It cost an afternoon: 14 failures, a
+  2.2-hour wall-clock, and two wrong diagnoses (auth rate limiting, then a corrupted dev
+  server) before the cause turned out to be a second run I had started myself to investigate
+  the first. Alone, the same suite is 3.6 minutes and green.
+- **Never pipe Playwright through `tail` or `grep` without keeping `$?`.** The exit code you
+  see is the last command in the pipe, so a run with 14 failures reports "exited with code 0"
+  and a truncated tail can hide the failure list entirely. Two runs were misread as clean this
+  way. Redirect to a file and echo the code:
+  `npx playwright test --reporter=list > out.txt 2>&1; echo "EXIT: $?"`.
 - **Killing a run skips `globalTeardown`**, leaving `@example.com` accounts in the live
   database. Run it by hand:
   `npx tsx -e "import t from './tests/global-teardown'; (t as any)()"`.
